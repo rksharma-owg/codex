@@ -678,6 +678,10 @@ async fn read_process_start_time(pid: u32) -> Result<String> {
 #[cfg(unix)]
 async fn read_process_details(pid: u32) -> Result<(String, String)> {
     let output = Command::new("ps")
+        // Keep the persisted process identity stable across daemon commands
+        // launched from different locales or time zones.
+        .env("LC_ALL", "C")
+        .env("TZ", "UTC")
         .args(["-p", &pid.to_string(), "-o", "stat=", "-o", "lstart="])
         .output()
         .await

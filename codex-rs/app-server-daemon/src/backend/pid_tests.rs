@@ -20,6 +20,42 @@ use super::read_stderr_log_tail;
 use super::stderr_log_file_for_pid_file;
 use super::try_lock_file;
 
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn process_start_time_is_locale_independent() {
+    if std::env::var_os("CODEX_PID_LOCALE_TEST_CHILD").is_some() {
+        let actual = read_process_start_time(std::process::id())
+            .await
+            .expect("read process start time");
+        let expected = std::process::Command::new("ps")
+            .env("LC_ALL", "C")
+            .env("TZ", "UTC")
+            .args(["-p", &std::process::id().to_string(), "-o", "lstart="])
+            .output()
+            .expect("invoke ps")
+            .stdout;
+        let expected = String::from_utf8(expected)
+            .expect("ps output is utf-8")
+            .trim()
+            .to_string();
+        assert_eq!(actual, expected);
+        return;
+    }
+
+    let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        .args([
+            "--exact",
+            "backend::pid::tests::process_start_time_is_locale_independent",
+            "--nocapture",
+        ])
+        .env("CODEX_PID_LOCALE_TEST_CHILD", "1")
+        .env("LC_ALL", "en_AU.UTF-8")
+        .env("TZ", "America/Los_Angeles")
+        .status()
+        .expect("run locale-specific child test");
+    assert!(status.success(), "locale-specific child test failed");
+}
+
 #[cfg(windows)]
 fn is_elevated_test_process() -> anyhow::Result<bool> {
     let output = std::process::Command::new("powershell.exe")
