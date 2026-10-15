@@ -152,31 +152,67 @@ jobs:
         'FORK_REAL_BAZEL\\'], *args]).returncode)\\n',encoding='utf-8')\n(root/'bazel').write_text('#!/usr/bin/env\
         \ bash\\nexec '+__import__('shlex').quote(sys.executable.replace('\\\\','/'))+' '+__import__('shlex').quote(str(root/'bazel.py').replace('\\\
         \\','/'))+' \"$@\"\\n',encoding='utf-8')\n(root/'bazel').chmod(0o755)\nlauncher=root/'bazel'\nif os.name=='nt':\n\
-        \    launcher=root/'bazel.cmd'\n    launcher.write_text('@\"'+sys.executable+'\" \"'+str(root/'bazel.py')+'\"\
-        \ %*\\r\\n',encoding='utf-8')\nwith open(os.environ['GITHUB_ENV'],'a',encoding='utf-8') as stream:\n   \
-        \ stream.write('FORK_REAL_BAZEL='+real+'\\nFORK_BAZEL_JOBS='+os.environ['FORK_BUDGET_CPU']+'\\nCODEX_BAZEL_BIN='+str(launcher)+'\\\
-        n')\nwith open(os.environ['GITHUB_PATH'],'a',encoding='utf-8') as stream: stream.write(str(root)+'\\n')\n\
-        print(json.dumps({'real_bazel':real,'launcher':str(launcher),'jobs':os.environ['FORK_BUDGET_CPU']}))\nFORK_INSTALL_PY\n"
+        \    import subprocess\n    source=root/'budget.cs'\n    source.write_text('using System;\\nusing System.Collections.Generic;\\\
+        nusing System.Diagnostics;\\nusing System.Text;\\n\\nclass ForkBazelBudget {\\n    // Quote for CreateProcess/CRT\
+        \ argument parsing; no command shell is involved.\\n    static string Quote(string value) {\\n        if\
+        \ (value.Length != 0 && value.IndexOfAny(new char[] {\\' \\', \\'\\\\t\\', \\'\\\\n\\', \\'\\\\v\\', \\\
+        '\"\\'}) < 0)\\n            return value;\\n        var result = new StringBuilder(\"\\\\\"\");\\n     \
+        \   int slashes = 0;\\n        foreach (char c in value) {\\n            if (c == \\'\\\\\\\\\\') { slashes++;\
+        \ continue; }\\n            result.Append(\\'\\\\\\\\\\', c == \\'\"\\' ? slashes * 2 + 1 : slashes);\\\
+        n            result.Append(c);\\n            slashes = 0;\\n        }\\n        result.Append(\\'\\\\\\\\\
+        \\', slashes * 2);\\n        result.Append(\\'\"\\');\\n        return result.ToString();\\n    }\\n\\n\
+        \    static int Main(string[] args) {\\n        var forwarded = new List<string>(args);\\n        string\
+        \ command = \"\";\\n        foreach (string arg in args) {\\n            if (!arg.StartsWith(\"-\")) { command\
+        \ = arg; break; }\\n        }\\n        if (command == \"build\" || command == \"test\" || command == \"\
+        coverage\" ||\\n            command == \"run\" || command == \"aquery\" || command == \"cquery\") {\\n \
+        \           int budget = int.Parse(Environment.GetEnvironmentVariable(\"FORK_BAZEL_JOBS\"));\\n        \
+        \    if (budget < 1 || budget > 4) throw new ArgumentOutOfRangeException(\"FORK_BAZEL_JOBS\");\\n      \
+        \      int pos = forwarded.IndexOf(\"--\");\\n            if (pos < 0) pos = forwarded.Count;\\n       \
+        \     forwarded.InsertRange(pos, new string[] {\"--jobs=\" + budget,\\n                \"--local_resources=cpu=\"\
+        \ + budget, \"--announce_rc\"});\\n            Console.Error.WriteLine(\"Fork Bazel enforced jobs=\" + budget\
+        \ + \" for \" + command);\\n        }\\n        var quoted = new List<string>();\\n        foreach (string\
+        \ arg in forwarded) quoted.Add(Quote(arg));\\n        var info = new ProcessStartInfo(Environment.GetEnvironmentVariable(\"\
+        FORK_REAL_BAZEL\"),\\n            string.Join(\" \", quoted));\\n        info.UseShellExecute = false;\\\
+        n        using (var child = Process.Start(info)) {\\n            child.WaitForExit();\\n            return\
+        \ child.ExitCode;\\n        }\\n    }\\n}\\n',encoding='utf-8')\n    compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'\n\
+        \    if not compiler.is_file(): raise RuntimeError('Native .NET Framework C# compiler unavailable')\n  \
+        \  launcher=root/'bazel.exe'\n    subprocess.run([str(compiler),'/nologo','/out:'+str(launcher),str(source)],check=True)\n\
+        with open(os.environ['GITHUB_ENV'],'a',encoding='utf-8') as stream:\n    stream.write('FORK_REAL_BAZEL='+real+'\\\
+        nFORK_BAZEL_JOBS='+os.environ['FORK_BUDGET_CPU']+'\\nCODEX_BAZEL_BIN='+str(launcher)+'\\n')\nwith open(os.environ['GITHUB_PATH'],'a',encoding='utf-8')\
+        \ as stream: stream.write(str(root)+'\\n')\nprint(json.dumps({'real_bazel':real,'launcher':str(launcher),'jobs':os.environ['FORK_BUDGET_CPU']}))\n\
+        FORK_INSTALL_PY\n"
     - name: Verify native fork budget through upstream Python wrapper
       shell: bash
       if: success()
       run: "python - <<'FORK_CONTROL_PY'\n\"\"\"Exercise native subprocess launch through the actual upstream BuildBuddy\
-        \ wrapper.\"\"\"\nfrom pathlib import Path\nimport json,os,shlex,subprocess,sys,tempfile\nwith tempfile.TemporaryDirectory(prefix='fork\
+        \ wrapper.\"\"\"\nfrom pathlib import Path\nimport base64,json,os,shlex,subprocess,sys,tempfile\nwith tempfile.TemporaryDirectory(prefix='fork\
         \ budget control ',dir=os.environ.get('RUNNER_TEMP')) as tmp:\n    root=Path(tmp);capture=root/'capture.py';output=root/'captured.json'\n\
         \    capture.write_text(\"import json,os,sys\\nfrom pathlib import Path\\nPath(os.environ['CAPTURE_OUTPUT']).write_text(json.dumps(sys.argv[1:]))\\\
-        nsys.exit(int(os.environ.get('CAPTURE_EXIT','0')))\\n\")\n    fake=root/('real-bazel.cmd' if os.name=='nt'\
-        \ else 'real-bazel')\n    if os.name=='nt': fake.write_text('@\"'+sys.executable+'\" \"'+str(capture)+'\"\
-        \ %*\\r\\n')\n    else:\n        fake.write_text('#!/bin/sh\\nexec '+shlex.quote(sys.executable)+' '+shlex.quote(str(capture))+'\
+        nsys.exit(int(os.environ.get('CAPTURE_EXIT','0')))\\n\")\n    fake=root/('real-bazel.exe' if os.name=='nt'\
+        \ else 'real-bazel')\n    if os.name=='nt':\n        source=root/'capture.cs'\n        source.write_text('using\
+        \ System; using System.IO; using System.Text; class Capture { static int Main(string[] args) { File.WriteAllLines(Environment.GetEnvironmentVariable(\"\
+        CAPTURE_OUTPUT\"), Array.ConvertAll(args, s => Convert.ToBase64String(Encoding.UTF8.GetBytes(s)))); return\
+        \ int.Parse(Environment.GetEnvironmentVariable(\"CAPTURE_EXIT\") ?? \"0\"); } }')\n        compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'\n\
+        \        subprocess.run([str(compiler),'/nologo','/out:'+str(fake),str(source)],check=True)\n    else:\n\
+        \        fake.write_text('#!/bin/sh\\nexec '+shlex.quote(sys.executable)+' '+shlex.quote(str(capture))+'\
         \ \"$@\"\\n');fake.chmod(0o755)\n    env=dict(os.environ,FORK_REAL_BAZEL=str(fake),CAPTURE_OUTPUT=str(output),BUILDBUDDY_API_KEY='')\n\
         \    wrapper=Path('.github/scripts/run_bazel_with_buildbuddy.py')\n    commands=[['build','--jobs=8','--','//:local_windows'],['test','--jobs=30','--test_filter=some\
         \ name','--','//some:target'],['query','--output=label','--','kind(\"rust_library rule\", //...)']]\n  \
-        \  for command in commands:\n        result=subprocess.run([sys.executable,str(wrapper),*command],env=env)\n\
+        \  commands.append(['build','--jobs=8','--test_env=PATH='+'C:\\\\Program Files\\\\SDK\\\\bin;'*700,'--','//:local_windows'])\n\
+        \    commands.append(['test','--test_filter=spaces and \"quotes\" \\\\\\\\ tail\\\\','--','//some:target'])\n\
+        \    for command in commands:\n        result=subprocess.run([sys.executable,str(wrapper),*command],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)\n\
+        \        if os.environ.get('EXPECTED_CMD_LIMIT_FAILURE')=='1' and sum(map(len,command))>10000:\n       \
+        \     if result.returncode==0 or 'The command line is too long' not in result.stdout:raise RuntimeError('CMD\
+        \ negative control did not reproduce command-length failure')\n            print('Expected CMD8191-character\
+        \ failure verified; no test-pass claim for rejected command')\n            sys.exit(0)\n        print(result.stdout,end='')\n\
         \        if result.returncode:raise RuntimeError(f'Native wrapper failed: {result.returncode}')\n      \
-        \  got=json.loads(output.read_text());pos=got.index('--')\n        if command[0] in {'build','test'}:\n\
-        \            jobs=[a for a in got[:pos] if a.startswith('--jobs=')]\n            if jobs[-1]!='--jobs='+env['FORK_BAZEL_JOBS']:raise\
+        \  got=[base64.b64decode(line).decode() for line in output.read_text().splitlines()] if os.name=='nt' else\
+        \ json.loads(output.read_text());pos=got.index('--')\n        if command[0] in {'build','test'}:\n     \
+        \       jobs=[a for a in got[:pos] if a.startswith('--jobs=')]\n            if jobs[-1]!='--jobs='+env['FORK_BAZEL_JOBS']:raise\
         \ ValueError(got)\n            if got[pos:]!=command[command.index('--'):]:raise ValueError(got)\n     \
-        \       if command[0]=='test' and '--test_filter=some name' not in got:raise ValueError(got)\n        elif\
-        \ any(a.startswith('--jobs=') for a in got):raise ValueError(got)\n        print(json.dumps({'platform':sys.platform,'command':command,'received':got}))\n\
+        \   elif any(a.startswith('--jobs=') for a in got):raise ValueError(got)\n        for original in command[1:command.index('--')]:\n\
+        \            if original not in got:raise ValueError('Argument changed through native launcher')\n     \
+        \   print(json.dumps({'platform':sys.platform,'command':command[0],'argument_count':len(got),'characters':sum(map(len,got)),'arguments_preserved':True}))\n\
         \    env['CAPTURE_EXIT']='37'\n    result=subprocess.run([sys.executable,str(wrapper),'build','--jobs=8','--','//:local_windows'],env=env)\n\
         \    if result.returncode!=37:raise ValueError(f'Child exit status changed: {result.returncode}')\nprint('Native\
         \ wrapper budget controls passed')\n\nFORK_CONTROL_PY\n"
