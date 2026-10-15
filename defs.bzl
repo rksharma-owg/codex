@@ -54,16 +54,22 @@ def _workspace_root_test_impl(ctx):
     launcher_template = ctx.file._windows_launcher_template if is_windows else ctx.file._bash_launcher_template
     runfile_env_exports = _windows_runfile_env_exports(ctx) if is_windows else _bash_runfile_env_exports(ctx)
     workspace_root_setup = _windows_workspace_root_setup(ctx) if is_windows else _bash_workspace_root_setup(ctx)
+    substitutions = {
+        "__RUNFILE_ENV_EXPORTS__": runfile_env_exports,
+        "__TEST_BIN__": test_bin.short_path,
+        "__WORKSPACE_ROOT_SETUP__": workspace_root_setup,
+        "__WORKSPACE_ROOT_MARKER__": workspace_root_marker.short_path,
+    }
+    if is_windows:
+        # CMD can lose call/label state in LF-only batch scripts.
+        # Normalize inserted commands too; substitutions run in insertion order.
+        substitutions["\r\n"] = "\n"
+        substitutions["\n"] = "\r\n"
     ctx.actions.expand_template(
         template = launcher_template,
         output = launcher,
         is_executable = True,
-        substitutions = {
-            "__RUNFILE_ENV_EXPORTS__": runfile_env_exports,
-            "__TEST_BIN__": test_bin.short_path,
-            "__WORKSPACE_ROOT_SETUP__": workspace_root_setup,
-            "__WORKSPACE_ROOT_MARKER__": workspace_root_marker.short_path,
-        },
+        substitutions = substitutions,
     )
 
     runfiles = ctx.runfiles(files = [test_bin, workspace_root_marker]).merge(ctx.attr.test_bin[DefaultInfo].default_runfiles)
