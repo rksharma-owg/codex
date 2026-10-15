@@ -473,3 +473,74 @@ async fn broken_selection_is_not_a_missing_installation() {
         PathBuf::from("missing-release")
     );
 }
+
+#[tokio::test]
+async fn explicit_selection_recovers_missing_selection_without_removing_state() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let source = temp.path().join("source");
+    let bin = package(&source, "0.152.0");
+    let settings = DaemonSettings::default();
+    prepare_from_package(
+        &daemon(&home),
+        &settings,
+        InstallMode::Missing,
+        Some(&source),
+        &bin,
+        |_| Ok(true),
+    )
+    .await
+    .unwrap();
+    let root = home.join("packages/app-server-daemon");
+    let previous = root.join("current").canonicalize().unwrap();
+    std::fs::remove_file(root.join("current")).unwrap();
+    let state = home.join("app-server-daemon");
+    std::fs::create_dir_all(&state).unwrap();
+    let log = state.join("daemon.stderr.log");
+    std::fs::write(&log, b"previous launch diagnostics").unwrap();
+
+    let error = prepare_from_package(
+        &daemon(&home),
+        &settings,
+        InstallMode::Missing,
+        Some(&source),
+        &bin,
+        |_| panic!("implicit start must not replace an existing installation"),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("daemon executable not found"));
+
+    assert!(
+        !prepare_from_package(
+            &daemon(&home),
+            &settings,
+            InstallMode::Replace,
+            Some(&source),
+            &bin,
+            |request| {
+                assert_eq!(request.installed_version, None);
+                assert!(!request.restart_required);
+                Ok(false)
+            },
+        )
+        .await
+        .unwrap()
+    );
+    assert!(!root.join("current").exists());
+    prepare_from_package(
+        &daemon(&home),
+        &settings,
+        InstallMode::Replace,
+        Some(&source),
+        &bin,
+        |_| Ok(true),
+    )
+    .await
+    .unwrap();
+    let selected = root.join("current").canonicalize().unwrap();
+    assert!(validate_package(&selected, "bin/codex").is_ok());
+    assert!(previous.join("bin/codex").is_file());
+    assert_eq!(std::fs::read(&log).unwrap(), b"previous launch diagnostics");
+    assert!(!root.join("auto-update-version").exists());
+}
