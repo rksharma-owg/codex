@@ -8,12 +8,21 @@ use std::path::PathBuf;
 ///
 /// - If `CODEX_HOME` is set, the value must exist and be a directory. The
 ///   value will be canonicalized and this function will Err otherwise.
+/// - A non-Unicode `CODEX_HOME` returns an error rather than selecting the default directory.
 /// - If `CODEX_HOME` is not set, this function does not verify that the
 ///   directory exists.
 pub fn find_codex_home() -> std::io::Result<AbsolutePathBuf> {
-    let codex_home_env = std::env::var("CODEX_HOME")
-        .ok()
-        .filter(|val| !val.is_empty());
+    let codex_home_env = match std::env::var("CODEX_HOME") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "CODEX_HOME is set but is not valid Unicode",
+            ));
+        }
+    }
+    .filter(|val| !val.is_empty());
     find_codex_home_from_env(codex_home_env.as_deref())
 }
 
