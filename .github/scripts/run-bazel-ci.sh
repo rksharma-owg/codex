@@ -300,9 +300,18 @@ if [[ "${RUNNER_OS:-}" == "Windows" && $windows_cross_compile -eq 1 && -n "${BUI
 fi
 
 if [[ "${RUNNER_OS:-}" == "Windows" && $windows_cross_compile -eq 1 && -z "${BUILDBUDDY_API_KEY:-}" ]]; then
-  # The Windows cross-compile config depends on authenticated remote
-  # execution. When credentials are unavailable, keep the local build shape
-  # and its lower concurrency cap.
+  # The default target follows the MSVC host platform. Match its C/C++ ABI
+  # rather than linking hermetic GNU objects into MSVC Rust binaries.
+  has_target_platform_override=0
+  for arg in "${bazel_args[@]}"; do
+    if [[ "$arg" == --platforms=* || "$arg" == --platforms ]]; then
+      has_target_platform_override=1
+      break
+    fi
+  done
+  if [[ $has_target_platform_override -eq 0 ]]; then
+    post_config_bazel_args+=(--config=ci-windows-msvc)
+  fi
   post_config_bazel_args+=(--jobs=8)
 fi
 
