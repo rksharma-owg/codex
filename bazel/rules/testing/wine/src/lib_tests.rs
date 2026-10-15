@@ -308,6 +308,7 @@ async fn pinned_powershell_runs_under_wine_with_a_pty() -> Result<()> {
         "$PSVersionTable.PSEdition + '|' + ",
         "$IsWindows.ToString().ToLowerInvariant() + '|' + $separatorCode)",
     );
+    let diagnostic_start = std::time::Instant::now();
     let runtime = WineRuntimePaths::from_runfiles()?;
     let prefix = TempDir::new()?;
     install_powershell_runtime(prefix.path(), &runtime.powershell_runtime)?;
@@ -370,12 +371,20 @@ async fn pinned_powershell_runs_under_wine_with_a_pty() -> Result<()> {
         codex_utils_pty::ChildFds::Inherited(&[]),
     )
     .await?;
+    eprintln!("wine-stage spawned at {:?}", diagnostic_start.elapsed());
     let command_result = timeout(Duration::from_secs(30), async {
         let stdout = async {
             let mut output = Vec::new();
             while let Some(chunk) = stdout_rx.recv().await {
                 output.extend(chunk);
+                eprintln!(
+                    "wine-stage stdout bytes={} marker={} elapsed={:?}",
+                    output.len(),
+                    String::from_utf8_lossy(&output).contains(POWERSHELL_SMOKE_MARKER),
+                    diagnostic_start.elapsed()
+                );
             }
+            eprintln!("wine-stage stdout EOF at {:?}", diagnostic_start.elapsed());
             output
         };
         let stderr = async {
@@ -383,9 +392,17 @@ async fn pinned_powershell_runs_under_wine_with_a_pty() -> Result<()> {
             while let Some(chunk) = stderr_rx.recv().await {
                 output.extend(chunk);
             }
+            eprintln!("wine-stage stderr EOF at {:?}", diagnostic_start.elapsed());
             output
         };
-        let (stdout, stderr, exit_code) = tokio::join!(stdout, stderr, exit_rx);
+        let (stdout, stderr, exit_code) = tokio::join!(stdout, stderr, async {
+            let code = exit_rx.await;
+            eprintln!(
+                "wine-stage child exit={code:?} at {:?}",
+                diagnostic_start.elapsed()
+            );
+            code
+        });
         Ok::<_, anyhow::Error>((stdout, stderr, exit_code.context("wait for PowerShell")?))
     })
     .await
