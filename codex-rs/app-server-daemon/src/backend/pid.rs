@@ -689,7 +689,23 @@ async fn reservation_lock_is_active(path: &Path) -> Result<bool> {
                 .with_context(|| format!("failed to inspect pid lock file {}", path.display()));
         }
     };
-    Ok(!try_lock_file(&file)?)
+    probe_reservation_lock(file)
+}
+
+#[cfg(any(unix, windows))]
+fn probe_reservation_lock(file: fs::File) -> Result<bool> {
+    let locked = try_lock_file(&file)?;
+    #[cfg(unix)]
+    if locked {
+        use std::os::fd::AsRawFd;
+
+        // Closing our descriptor cannot release a lock retained by a forked child.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } != 0 {
+            return Err(std::io::Error::last_os_error())
+                .context("failed to unlock pid reservation probe");
+        }
+    }
+    Ok(!locked)
 }
 
 #[cfg(not(any(unix, windows)))]

@@ -41,6 +41,53 @@ fn is_elevated_test_process() -> anyhow::Result<bool> {
     }
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn pid_probe_releases_lock_with_inherited_descriptor() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let backend = PidBackend::new(
+        temp_dir.path().join("codex"),
+        temp_dir.path().join("app-server.pid"),
+        /*remote_control_enabled*/ false,
+    );
+    let probe = tokio::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&backend.lock_file)
+        .await
+        .expect("open probe lock file");
+    // A duplicate shares the lock's open file description, just like a forked child.
+    let inherited = probe.try_clone().await.expect("duplicate probe handle");
+    assert!(!super::probe_reservation_lock(probe).expect("probe reservation"));
+    assert_eq!(
+        backend.read_pid_file_state().await.expect("read pid"),
+        PidFileState::Missing
+    );
+    drop(inherited);
+}
+
+#[tokio::test]
+async fn pid_probe_preserves_live_reservation_without_pid_record() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let backend = PidBackend::new(
+        temp_dir.path().join("codex"),
+        temp_dir.path().join("app-server.pid"),
+        /*remote_control_enabled*/ false,
+    );
+    let _reservation = backend
+        .acquire_reservation_lock()
+        .await
+        .expect("acquire live reservation");
+    for _ in 0..2 {
+        assert_eq!(
+            backend.read_pid_file_state().await.expect("read pid"),
+            PidFileState::Starting
+        );
+    }
+    assert!(!backend.pid_file.exists());
+}
+
 #[tokio::test]
 async fn locked_empty_pid_file_is_treated_as_active_reservation() {
     let temp_dir = TempDir::new().expect("temp dir");
