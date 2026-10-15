@@ -13,6 +13,17 @@ class RunBazelCiTest(unittest.TestCase):
     def run_wrapper(
         self, *options: str, remote: bool = False, cross: bool = True
     ) -> list[str]:
+        bash = "bash"
+        if os.name == "nt":
+            git = shutil.which("git")
+            self.assertIsNotNone(git, "Git Bash is required to test the Bazel wrapper")
+            for parent in Path(git).parents:
+                candidate = parent / "bin" / "bash.exe"
+                if candidate.is_file():
+                    bash = str(candidate)
+                    break
+            else:
+                self.fail("Could not locate Git Bash beside git.exe")
         with TemporaryDirectory() as temp_dir:
             directory = Path(temp_dir)
             script = directory / "run-bazel-ci.sh"
@@ -37,7 +48,7 @@ class RunBazelCiTest(unittest.TestCase):
             env["BUILDBUDDY_API_KEY"] = "test-key" if remote else ""
             result = subprocess.run(
                 [
-                    "bash",
+                    bash,
                     script.as_posix(),
                     *(["--windows-cross-compile"] if cross else []),
                     "--",
@@ -51,7 +62,7 @@ class RunBazelCiTest(unittest.TestCase):
                 text=True,
                 check=False,
             )
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             return json.loads(result.stdout.splitlines()[-1])
 
     def test_keyless_default_target_uses_native_msvc_toolchains(self) -> None:
