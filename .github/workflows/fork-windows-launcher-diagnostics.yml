@@ -1,0 +1,43 @@
+name: Unchanged Windows launcher diagnostics
+'on':
+  push:
+    branches:
+    - codex/ci-windows-launcher-diagnostics-20261015
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: 44166665bd8f8988aa9c2445ed49778e62d2bd88
+        persist-credentials: false
+    - name: Native fixture against unchanged launcher template
+      shell: python
+      run: "from pathlib import Path\nimport os,subprocess,tempfile\nroot=Path.cwd(); base=Path(os.environ['RUNNER_TEMP'])/'launcher\
+        \ fixture';base.mkdir()\ncs=base/'fixture.cs';cs.write_text('class Fixture { static int Main(string[] args)\
+        \ { if (System.Array.IndexOf(args,\"--list\") >= 0) System.Console.WriteLine(\"fixture_test: test\"); else\
+        \ System.Console.WriteLine(\"LAUNCHER_FIXTURE_EXECUTED\"); return 0; } }')\nexe=base/'fixture.exe';csc=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'\n\
+        subprocess.run([str(csc),'/nologo','/out:'+str(exe),str(cs)],check=True)\nlogical='codex-rs/app-server/test-bin.exe';marker='codex-rs/utils/repo_root.marker';runfiles=base/'runfiles';(runfiles/Path(marker).parent).mkdir(parents=True);(runfiles/marker).touch();(runfiles/Path(logical).parent).mkdir(parents=True,exist_ok=True)\n\
+        import shutil\nshutil.copyfile(exe,runfiles/logical)\nextras=['bwrap','codex-code-mode-host','test_stdio_server']\n\
+        for name in extras:shutil.copyfile(exe,runfiles/(name+'.exe'))\nmanifest=base/'MANIFEST';manifest.write_text('\\\
+        n'.join([f'{logical} {runfiles/logical}',f'{marker} {runfiles/marker}']+[f'{name}.exe {runfiles/(name+\"\
+        .exe\")}' for name in extras])+'\\n')\noriginal=(root/'workspace_root_test_launcher.bat.tpl').read_text()\n\
+        for layout in ['tree','manifest']:\n for count in [0,1,3]:\n  for sharded in [False,True]:\n   text=original.replace('__WORKSPACE_ROOT_MARKER__',marker).replace('__TEST_BIN__',logical).replace('__WORKSPACE_ROOT_SETUP__','')\n\
+        \   exports='\\n'.join(f'call :resolve_runfile \"{name}.exe\"\\nif errorlevel 1 exit /b 1\\nset \"CARGO_BIN_EXE_{name}=!resolve_runfile_result!\"\
+        ' for name in extras[:count])\n   text=text.replace('__RUNFILE_ENV_EXPORTS__',exports)\n   bat=base/f'launcher-{layout}-{count}-{sharded}.bat';bat.write_text(text)\n\
+        \   env=os.environ.copy()\n   for key in ['RUNFILES_DIR','TEST_SRCDIR','RUNFILES_MANIFEST_FILE','RULES_RUST_TEST_TOTAL_SHARDS','TEST_TOTAL_SHARDS','TEST_SHARD_INDEX','RULES_RUST_TEST_SHARD_INDEX','CODEX_BAZEL_TEST_SKIP_FILTERS','TESTBRIDGE_TEST_ONLY']:env.pop(key,None)\n\
+        \   if layout=='tree':env['RUNFILES_DIR']=str(runfiles)\n   else:env['RUNFILES_MANIFEST_FILE']=str(manifest)\n\
+        \   if sharded:env.update(TEST_TOTAL_SHARDS='1',TEST_SHARD_INDEX='0')\n   result=subprocess.run(['cmd.exe','/d','/c',str(bat)],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)\n\
+        \   print(layout,count,sharded,'exit=',result.returncode,flush=True);print(result.stdout,flush=True)\n \
+        \  if result.returncode or 'LAUNCHER_FIXTURE_EXECUTED' not in result.stdout:\n    traced=base/f'trace-{layout}-{count}-{sharded}.bat';traced.write_text(text.replace('@echo\
+        \ off','@echo on',1));r=subprocess.run(['cmd.exe','/d','/c',str(traced)],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT);print(r.stdout,flush=True)\n\
+        \    raise SystemExit('Unchanged Windows launcher reproduction failed')\nprint('All12 unchanged launcher\
+        \ controls passed')\n"
+    - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      if: always()
+      with:
+        name: unchanged-windows-launcher-fixtures
+        path: ${{ runner.temp }}/launcher fixture/*.bat
