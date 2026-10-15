@@ -1,0 +1,342 @@
+name: All three patches - fourteen repairs full CI
+'on':
+  push:
+    branches:
+    - codex/full-validation-v7-20261015
+permissions:
+  contents: read
+jobs:
+  repair-regressions:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - ubuntu-24.04
+        - macos-15
+        - windows-latest
+    steps:
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
+      working-directory: ${{ github.workspace }}
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: 5923caad9b9a399be9f2a736045318bb9f91812a
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Verify repaired baseline
+      shell: bash
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "5923caad9b9a399be9f2a736045318bb9f91812a" ]]
+
+        printf "baseline=%s\nworkflow=%s\n" "5923caad9b9a399be9f2a736045318bb9f91812a" "${{ github.workflow_sha
+        }}"
+
+        '
+    - uses: ./.github/actions/prepare-bazel-ci
+      with:
+        target: ${{ runner.os == 'Windows' && 'x86_64-pc-windows-msvc' || runner.os == 'macOS' && 'aarch64-apple-darwin'
+          || 'x86_64-unknown-linux-gnu' }}
+        cache-scope: ci-repair-regressions
+    - name: Configure storage for public native runners
+      shell: bash
+      run: "set -euo pipefail\nif [[ \"$RUNNER_OS\" == Linux ]]; then\n  sudo rm -rf /usr/local/lib/android /usr/share/dotnet\
+        \ /opt/ghc\nfi\npython_cmd=python3\nif ! command -v \"$python_cmd\" >/dev/null 2>&1; then python_cmd=python;\
+        \ fi\ncpu=\"$(\"$python_cmd\" -c 'import os; print(max(1,min(4,os.cpu_count() or 2)))')\"\nprintf '\\ncommon\
+        \ --disk_cache=\\nbuild --jobs=%s\\ntest --local_test_jobs=0\\ntest --default_test_resources=cpu=%s\\n'\
+        \ \"$cpu\" \"$cpu\" >> \"$HOME/.bazelrc\"\nprintf 'Fork runner budget: build jobs=%s; tests reserve all\
+        \ %s configured CPUs\\n' \"$cpu\" \"$cpu\"\ndf -h\nrc_log=\"$RUNNER_TEMP/fork-bazel-rc.log\"\nbazel info\
+        \ --announce_rc output_base 2>&1 | tee \"$rc_log\"\nlast_cache_option=\"$(grep -oE -- '--disk_cache=[^[:space:]]*'\
+        \ \"$rc_log\" | tail -n 1)\"\n[[ \"$last_cache_option\" == --disk_cache= ]]\n\n\n# Install the fork-only\
+        \ launcher after Bazel setup, outside the source checkout.\nexport FORK_BUDGET_CPU=\"$cpu\"\n\"$python_cmd\"\
+        \ - <<'FORK_INSTALL_PY'\nimport os,sys,shutil,json\nfrom pathlib import Path\nroot=Path(os.environ['RUNNER_TEMP'])/'fork-bazel-bin'\n\
+        root.mkdir(exist_ok=True)\nreal=shutil.which('bazel')\nif not real: raise RuntimeError('Bazel setup did\
+        \ not install Bazel')\n(root/'bazel.py').write_text('#!/usr/bin/env python3\\n\"\"\"Fork-only resource limiter;\
+        \ preserve upstream options and target boundaries.\"\"\"\\nimport os\\nimport subprocess\\nimport sys\\\
+        n\\nargs = sys.argv[1:]\\ncommand = next((a for a in args if not a.startswith(\\'-\\')), \\'\\')\\nif command\
+        \ in {\\'build\\', \\'test\\', \\'coverage\\', \\'run\\', \\'aquery\\', \\'cquery\\'}:\\n    budget = int(os.environ[\\\
+        'FORK_BAZEL_JOBS\\'])\\n    if not 1 <= budget <= 4:\\n        raise ValueError(f\\'Invalid fork action\
+        \ budget: {budget}\\')\\n    pos = args.index(\\'--\\') if \\'--\\' in args else len(args)\\n    args[pos:pos]\
+        \ = [f\\'--jobs={budget}\\', f\\'--local_resources=cpu={budget}\\', \\'--local_test_jobs=0\\', f\\'--default_test_resources=cpu={budget}\\\
+        ', \\'--announce_rc\\']\\n    print(f\\'Fork Bazel enforced jobs={budget} for {command}\\', file=sys.stderr,\
+        \ flush=True)\\nsys.exit(subprocess.run([os.environ[\\'FORK_REAL_BAZEL\\'], *args]).returncode)\\n',encoding='utf-8')\n\
+        (root/'bazel').write_text('#!/usr/bin/env bash\\nexec '+__import__('shlex').quote(sys.executable.replace('\\\
+        \\','/'))+' '+__import__('shlex').quote(str(root/'bazel.py').replace('\\\\','/'))+' \"$@\"\\n',encoding='utf-8')\n\
+        (root/'bazel').chmod(0o755)\nlauncher=root/'bazel'\nif os.name=='nt':\n    import subprocess\n    source=root/'budget.cs'\n\
+        \    source.write_text('using System;\\nusing System.Collections.Generic;\\nusing System.Diagnostics;\\\
+        nusing System.Text;\\n\\nclass ForkBazelBudget {\\n    // Quote for CreateProcess/CRT argument parsing;\
+        \ no command shell is involved.\\n    static string Quote(string value) {\\n        if (value.Length !=\
+        \ 0 && value.IndexOfAny(new char[] {\\' \\', \\'\\\\t\\', \\'\\\\n\\', \\'\\\\v\\', \\'\"\\'}) < 0)\\n \
+        \           return value;\\n        var result = new StringBuilder(\"\\\\\"\");\\n        int slashes =\
+        \ 0;\\n        foreach (char c in value) {\\n            if (c == \\'\\\\\\\\\\') { slashes++; continue;\
+        \ }\\n            result.Append(\\'\\\\\\\\\\', c == \\'\"\\' ? slashes * 2 + 1 : slashes);\\n         \
+        \   result.Append(c);\\n            slashes = 0;\\n        }\\n        result.Append(\\'\\\\\\\\\\', slashes\
+        \ * 2);\\n        result.Append(\\'\"\\');\\n        return result.ToString();\\n    }\\n\\n    static int\
+        \ Main(string[] args) {\\n        var forwarded = new List<string>(args);\\n        string command = \"\"\
+        ;\\n        foreach (string arg in args) {\\n            if (!arg.StartsWith(\"-\")) { command = arg; break;\
+        \ }\\n        }\\n        if (command == \"build\" || command == \"test\" || command == \"coverage\" ||\\\
+        n            command == \"run\" || command == \"aquery\" || command == \"cquery\") {\\n            int budget\
+        \ = int.Parse(Environment.GetEnvironmentVariable(\"FORK_BAZEL_JOBS\"));\\n            if (budget < 1 ||\
+        \ budget > 4) throw new ArgumentOutOfRangeException(\"FORK_BAZEL_JOBS\");\\n            int pos = forwarded.IndexOf(\"\
+        --\");\\n            if (pos < 0) pos = forwarded.Count;\\n            forwarded.InsertRange(pos, new string[]\
+        \ {\"--jobs=\" + budget,\\n                \"--local_resources=cpu=\" + budget, \"--local_test_jobs=0\"\
+        ,\\n                \"--default_test_resources=cpu=\" + budget, \"--announce_rc\"});\\n            Console.Error.WriteLine(\"\
+        Fork Bazel enforced jobs=\" + budget + \" for \" + command);\\n        }\\n        var quoted = new List<string>();\\\
+        n        foreach (string arg in forwarded) quoted.Add(Quote(arg));\\n        var info = new ProcessStartInfo(Environment.GetEnvironmentVariable(\"\
+        FORK_REAL_BAZEL\"),\\n            string.Join(\" \", quoted));\\n        info.UseShellExecute = false;\\\
+        n        using (var child = Process.Start(info)) {\\n            child.WaitForExit();\\n            return\
+        \ child.ExitCode;\\n        }\\n    }\\n}\\n',encoding='utf-8')\n    compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'\n\
+        \    if not compiler.is_file(): raise RuntimeError('Native .NET Framework C# compiler unavailable')\n  \
+        \  launcher=root/'bazel.exe'\n    subprocess.run([str(compiler),'/nologo','/out:'+str(launcher),str(source)],check=True)\n\
+        with open(os.environ['GITHUB_ENV'],'a',encoding='utf-8') as stream:\n    stream.write('FORK_REAL_BAZEL='+real+'\\\
+        nFORK_BAZEL_JOBS='+os.environ['FORK_BUDGET_CPU']+'\\nCODEX_BAZEL_BIN='+str(launcher)+'\\n')\nwith open(os.environ['GITHUB_PATH'],'a',encoding='utf-8')\
+        \ as stream: stream.write(str(root)+'\\n')\nprint(json.dumps({'real_bazel':real,'launcher':str(launcher),'jobs':os.environ['FORK_BUDGET_CPU']}))\n\
+        FORK_INSTALL_PY\n"
+    - name: Verify native fork budget through upstream Python wrapper
+      shell: bash
+      run: "python - <<'FORK_CONTROL_PY'\n\"\"\"Exercise native subprocess launch through the actual upstream BuildBuddy\
+        \ wrapper.\"\"\"\nfrom pathlib import Path\nimport base64,json,os,shlex,subprocess,sys,tempfile\nwith tempfile.TemporaryDirectory(prefix='fork\
+        \ budget control ',dir=os.environ.get('RUNNER_TEMP')) as tmp:\n    root=Path(tmp);capture=root/'capture.py';output=root/'captured.json'\n\
+        \    capture.write_text(\"import json,os,sys\\nfrom pathlib import Path\\nPath(os.environ['CAPTURE_OUTPUT']).write_text(json.dumps(sys.argv[1:]))\\\
+        nsys.exit(int(os.environ.get('CAPTURE_EXIT','0')))\\n\")\n    fake=root/('real-bazel.exe' if os.name=='nt'\
+        \ else 'real-bazel')\n    if os.name=='nt':\n        source=root/'capture.cs'\n        source.write_text('using\
+        \ System; using System.IO; using System.Text; class Capture { static int Main(string[] args) { File.WriteAllLines(Environment.GetEnvironmentVariable(\"\
+        CAPTURE_OUTPUT\"), Array.ConvertAll(args, s => Convert.ToBase64String(Encoding.UTF8.GetBytes(s)))); return\
+        \ int.Parse(Environment.GetEnvironmentVariable(\"CAPTURE_EXIT\") ?? \"0\"); } }')\n        compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'\n\
+        \        subprocess.run([str(compiler),'/nologo','/out:'+str(fake),str(source)],check=True)\n    else:\n\
+        \        fake.write_text('#!/bin/sh\\nexec '+shlex.quote(sys.executable)+' '+shlex.quote(str(capture))+'\
+        \ \"$@\"\\n');fake.chmod(0o755)\n    env=dict(os.environ,FORK_REAL_BAZEL=str(fake),CAPTURE_OUTPUT=str(output),BUILDBUDDY_API_KEY='')\n\
+        \    wrapper=Path('.github/scripts/run_bazel_with_buildbuddy.py')\n    commands=[['build','--jobs=8','--','//:local_windows'],['test','--jobs=30','--local_test_jobs=2','--default_test_resources=cpu=1','--test_filter=some\
+        \ name','--','//some:target'],['query','--output=label','--','kind(\"rust_library rule\", //...)']]\n  \
+        \  commands.append(['build','--jobs=8','--test_env=PATH='+'C:\\\\Program Files\\\\SDK\\\\bin;'*700,'--','//:local_windows'])\n\
+        \    commands.append(['test','--test_filter=spaces and \"quotes\" \\\\\\\\ tail\\\\','--','//some:target'])\n\
+        \    for command in commands:\n        result=subprocess.run([sys.executable,str(wrapper),*command],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)\n\
+        \        if os.environ.get('EXPECTED_CMD_LIMIT_FAILURE')=='1' and sum(map(len,command))>10000:\n       \
+        \     if result.returncode==0 or 'The command line is too long' not in result.stdout:raise RuntimeError('CMD\
+        \ negative control did not reproduce command-length failure')\n            print('Expected CMD8191-character\
+        \ failure verified; no test-pass claim for rejected command')\n            sys.exit(0)\n        print(result.stdout,end='')\n\
+        \        if result.returncode:raise RuntimeError(f'Native wrapper failed: {result.returncode}')\n      \
+        \  got=[base64.b64decode(line).decode() for line in output.read_text().splitlines()] if os.name=='nt' else\
+        \ json.loads(output.read_text());pos=got.index('--')\n        if command[0] in {'build','test'}:\n     \
+        \       jobs=[a for a in got[:pos] if a.startswith('--jobs=')]\n            if jobs[-1]!='--jobs='+env['FORK_BAZEL_JOBS']:raise\
+        \ ValueError(got)\n            local=[a for a in got[:pos] if a.startswith('--local_test_jobs=')]\n    \
+        \        resources=[a for a in got[:pos] if a.startswith('--default_test_resources=cpu=')]\n           \
+        \ if local[-1]!='--local_test_jobs=0' or resources[-1]!='--default_test_resources=cpu='+env['FORK_BAZEL_JOBS']:raise\
+        \ ValueError(got)\n            if got[pos:]!=command[command.index('--'):]:raise ValueError(got)\n     \
+        \   elif any(a.startswith('--jobs=') for a in got):raise ValueError(got)\n        for original in command[1:command.index('--')]:\n\
+        \            if original not in got:raise ValueError('Argument changed through native launcher')\n     \
+        \   print(json.dumps({'platform':sys.platform,'command':command[0],'argument_count':len(got),'characters':sum(map(len,got)),'arguments_preserved':True}))\n\
+        \    env['CAPTURE_EXIT']='37'\n    result=subprocess.run([sys.executable,str(wrapper),'build','--jobs=8','--','//:local_windows'],env=env)\n\
+        \    if result.returncode!=37:raise ValueError(f'Child exit status changed: {result.returncode}')\nprint('Native\
+        \ wrapper budget controls passed')\n\nFORK_CONTROL_PY\n"
+    - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      with:
+        components: rustfmt,clippy
+    - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      with:
+        version: 0.11.3
+    - name: Verify Rust 1.95
+      shell: bash
+      run: 'rustc --version --verbose
+
+        cargo --version
+
+        rustc --version | grep -F "rustc 1.95.0 "'
+    - name: Pinned V8 Python source wheel with required hash verification
+      run: bazel build --lockfile_mode=error '@@rules_python++pip+v8_python_deps_311_markupsafe_sdist_594c6780//:pkg'
+    - name: Windows fallback routing controls
+      run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} -m unittest discover -s .github/scripts -p test_run_bazel_ci.py
+    - name: Formatter discovery and Windows command-size controls
+      run: uv run --frozen --project sdk/python --only-group test pytest sdk/python/tests/test_artifact_workflow_and_binaries.py
+        -k 'root_fmt or root_format or root_rust_formatter'
+    - name: Full repository formatting with all Rust sources
+      run: just fmt-check
+    - name: Linux Cargo build dependencies
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y pkg-config libcap-dev
+    - name: Native Windows rustls provider regression
+      if: runner.os == 'Windows'
+      shell: bash
+      env:
+        BUILDBUDDY_API_KEY: ''
+      run: ./.github/scripts/run-bazel-ci.sh --windows-cross-compile --print-failed-action-summary --print-failed-test-logs
+        -- test -- //codex-rs/utils/rustls-provider:rustls-provider-preinstalled-test
+    - name: PID probe descriptor and live-reservation regression
+      shell: bash
+      working-directory: codex-rs
+      run: cargo test --locked -p codex-app-server-daemon --lib backend::pid::tests::pid_probe_
+      if: runner.os != 'Windows'
+    - name: Windows PID live-reservation regression with MSVC linker
+      if: runner.os == 'Windows'
+      shell: pwsh
+      working-directory: codex-rs
+      run: '$linker = Join-Path $env:VCToolsInstallDir ''bin\Hostx64\x64\link.exe''
+
+        if (-not (Test-Path $linker)) { throw "MSVC linker not found at $linker" }
+
+        $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER = $linker
+
+        Write-Host "Cargo MSVC linker: $linker"
+
+        cargo test --locked -p codex-app-server-daemon --lib backend::pid::tests::pid_probe_
+
+        exit $LASTEXITCODE
+
+        '
+    - name: Record lockfile diagnostics
+      if: always() && !cancelled()
+      shell: bash
+      run: 'git diff --stat -- MODULE.bazel.lock
+
+        git diff -- MODULE.bazel.lock > "$CODEX_BAZEL_EXECUTION_LOG_COMPACT_DIR/module-lock.diff"
+
+        '
+    - name: Upload repair diagnostics
+      if: always() && !cancelled()
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: repair-regressions-${{ matrix.os }}
+        path: ${{ runner.temp }}/bazel-execution-logs
+        if-no-files-found: ignore
+    - name: Clean worktree
+      if: always() && !cancelled()
+      uses: ./.github/actions/check-clean-worktree
+    env:
+      RUST_MIN_STACK: '8388608'
+      CARGO_INCREMENTAL: '0'
+  focused:
+    name: ${{ matrix.patch.issue }} Rust 1.95 on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - ubuntu-24.04
+        - macos-15
+        - windows-latest
+        patch:
+        - issue: '48124'
+          branch: fix/reject-invalid-codex-home
+          package: codex-utils-home-dir
+          head: d8ff80f3301548f06bd128722e97a5a926446bca
+          base: 5923caad9b9a399be9f2a736045318bb9f91812a
+          merge: a6ab1f30f2b25bb2519de3efd89e4ee1803e489e
+          validation_branch: codex/validate-48124-ci-v7
+          upstream: e89b7c442c0433ad5167e72a5a25bb6d0712766a
+        - issue: '53935'
+          branch: fix/recover-missing-daemon-selection
+          package: codex-app-server-daemon
+          head: 18bb0ac24b18883cd95fc69bd8f1786672b1414b
+          base: 5923caad9b9a399be9f2a736045318bb9f91812a
+          merge: c9d0e0a05e9e1391ac114e0bfda434460757e832
+          validation_branch: codex/validate-53935-ci-v7
+          upstream: e89b7c442c0433ad5167e72a5a25bb6d0712766a
+        - issue: '54016'
+          branch: fix/resume-settled-error-overrides
+          package: codex-app-server
+          head: c66117aab2feb4465ac3dbef14254ed16f0a4334
+          base: 5923caad9b9a399be9f2a736045318bb9f91812a
+          merge: e03a79a021733ffa661d72272865bb129e37285a
+          validation_branch: codex/validate-54016-ci-v7
+          upstream: e89b7c442c0433ad5167e72a5a25bb6d0712766a
+    env:
+      RUST_MIN_STACK: '8388608'
+      CARGO_INCREMENTAL: '0'
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
+      working-directory: ${{ github.workspace }}
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: ${{ matrix.patch.merge }}
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Verify tested code
+      shell: bash
+      env:
+        PATCH: ${{ matrix.patch.head }}
+        TESTED: ${{ matrix.patch.merge }}
+        BASE: ${{ matrix.patch.base }}
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$TESTED" ]]
+
+        git merge-base --is-ancestor "$PATCH" HEAD
+
+        git merge-base --is-ancestor "$BASE" HEAD
+
+        printf "tested=%s\npatch=%s\nbase=%s\n" "$TESTED" "$PATCH" "$BASE"
+
+        printf "workflow=%s\n" "${{ github.workflow_sha }}"
+
+        '
+    - uses: ./.github/actions/setup-ci
+    - name: Install pinned Rust
+      uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      with:
+        components: rustfmt,clippy,rust-src
+    - name: Verify pinned Rust version
+      shell: bash
+      run: 'rustc --version --verbose
+
+        cargo --version
+
+        rustc --version | grep -F "rustc 1.95.0 "'
+    - name: Linux build dependencies
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y pkg-config libcap-dev
+    - name: Formatting
+      run: cargo fmt -- --config imports_granularity=Item --check
+    - name: Regression and crate tests
+      shell: bash
+      env:
+        ISSUE: ${{ matrix.patch.issue }}
+        PACKAGE: ${{ matrix.patch.package }}
+      run: "set -euo pipefail\nif [[ \"$ISSUE\" == 54016 ]]; then\n  cargo test --locked -p \"$PACKAGE\" --test\
+        \ resume_system_error\nelif [[ \"$ISSUE\" == 53935 ]]; then\n  cargo test --locked -p \"$PACKAGE\" --lib\n\
+        else\n  cargo test --locked -p \"$PACKAGE\"\nfi\n"
+    - name: Clippy including tests
+      if: always() && !cancelled()
+      run: cargo clippy --locked -p ${{ matrix.patch.package }} --tests -- -D warnings
+    - name: Clean worktree
+      if: always() && !cancelled()
+      uses: ./.github/actions/check-clean-worktree
+    needs:
+    - repair-regressions
+  issue-48124:
+    uses: ./.github/workflows/preflight-blocking-ci.yml
+    with:
+      target-sha: a6ab1f30f2b25bb2519de3efd89e4ee1803e489e
+      patch-sha: d8ff80f3301548f06bd128722e97a5a926446bca
+      base-sha: 5923caad9b9a399be9f2a736045318bb9f91812a
+      issue: '48124'
+    needs:
+    - repair-regressions
+  issue-53935:
+    uses: ./.github/workflows/preflight-blocking-ci.yml
+    with:
+      target-sha: c9d0e0a05e9e1391ac114e0bfda434460757e832
+      patch-sha: 18bb0ac24b18883cd95fc69bd8f1786672b1414b
+      base-sha: 5923caad9b9a399be9f2a736045318bb9f91812a
+      issue: '53935'
+    needs:
+    - repair-regressions
+  issue-54016:
+    uses: ./.github/workflows/preflight-blocking-ci.yml
+    with:
+      target-sha: e03a79a021733ffa661d72272865bb129e37285a
+      patch-sha: c66117aab2feb4465ac3dbef14254ed16f0a4334
+      base-sha: 5923caad9b9a399be9f2a736045318bb9f91812a
+      issue: '54016'
+    needs:
+    - repair-regressions

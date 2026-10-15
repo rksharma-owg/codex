@@ -1,0 +1,67 @@
+name: Fork preflight - codespell
+'on':
+  workflow_call:
+    inputs:
+      target-sha:
+        type: string
+        required: true
+      patch-sha:
+        type: string
+        required: true
+      base-sha:
+        type: string
+        required: true
+      issue:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  codespell:
+    name: Check for spelling errors
+    runs-on: ubuntu-latest
+    steps:
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
+      working-directory: ${{ github.workspace }}
+    - name: Checkout
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+        ref: ${{ inputs.target-sha }}
+        fetch-depth: 0
+    - name: Verify exact tested revision and merge parents
+      shell: bash
+      env:
+        TESTED_SHA: ${{ inputs.target-sha }}
+        PATCH_SHA: ${{ inputs.patch-sha }}
+        BASE_SHA: ${{ inputs.base-sha }}
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" ]]
+
+        git cat-file -e "$PATCH_SHA^{commit}"
+
+        git cat-file -e "$BASE_SHA^{commit}"
+
+        git merge-base --is-ancestor "$PATCH_SHA" HEAD
+
+        git merge-base --is-ancestor "$BASE_SHA" HEAD
+
+        printf ''tested=%s\npatch=%s\nbase=%s\nworkflow=%s\n'' "$TESTED_SHA" "$PATCH_SHA" "$BASE_SHA" ''${{ github.workflow_sha
+        }}''
+
+        git show -s --format=fuller HEAD
+
+        '
+    - name: Annotate locations with typos
+      uses: codespell-project/codespell-problem-matcher@b80729f885d32f78a716c2f107b4db1025001c42
+    - name: Codespell
+      uses: codespell-project/actions-codespell@8f01853be192eb0f849a5c7d721450e7a467c579
+      with:
+        ignore_words_file: .codespellignore
+    - name: Check for a clean worktree
+      if: always() && !cancelled()
+      uses: ./.github/actions/check-clean-worktree
