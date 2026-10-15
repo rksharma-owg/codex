@@ -45,6 +45,7 @@ common:macos --strategy=CcConfigureMakeRule=remote,sandboxed,local
 common:windows --test_env=SYSTEMROOT
 common:windows --test_env=COMSPEC
 common:windows --test_env=WINDIR
+common:windows --test_env=PATHEXT
 # MXC transport validates these host-owned bootstrap values before launch.
 common:windows --test_env=SystemDrive
 common:windows --test_env=LOCALAPPDATA
