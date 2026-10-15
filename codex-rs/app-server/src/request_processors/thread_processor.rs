@@ -4583,7 +4583,10 @@ impl ThreadRequestProcessor {
                     existing_thread.multi_agent_version(),
                     &config_snapshot.session_source,
                 ) && !has_subscribers
-                    && matches!(loaded_status, ThreadStatus::Idle | ThreadStatus::SystemError)
+                    && matches!(
+                        loaded_status,
+                        ThreadStatus::Idle | ThreadStatus::SystemError
+                    )
                     && !is_running
                 {
                     // A loaded, settled thread is only a cache entry. Shut it down
