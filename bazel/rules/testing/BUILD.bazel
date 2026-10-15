@@ -1,5 +1,17 @@
+load("@rules_rust//rust:defs.bzl", "rust_test")
+
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
     "foreign_platform_binary.bzl",
 ])
+
+rust_test(
+    name = "windows-workspace-root-launcher-test",
+    srcs = ["windows_workspace_root_launcher_test.rs"],
+    crate_name = "windows_workspace_root_launcher_test",
+    data = ["//codex-rs/app-server:app-server-unit-tests"],
+    edition = "2024",
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = ["//codex-rs/utils/cargo-bin"],
+)
