@@ -1,19 +1,4 @@
 name: Fork preflight - repo-checks
-on:
-  workflow_call:
-    inputs:
-      target-sha:
-        type: string
-        required: true
-      patch-sha:
-        type: string
-        required: true
-      base-sha:
-        type: string
-        required: true
-      issue:
-        type: string
-        required: true
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -45,53 +30,87 @@ jobs:
 
         git merge-base --is-ancestor "$BASE_SHA" HEAD
 
-        printf ''tested=%s\npatch=%s\nbase=%s\nworkflow=%s\n'' "$TESTED_SHA" "$PATCH_SHA" "$BASE_SHA" ''${{ github.workflow_sha
-        }}''
+        printf ''tested=%s\npatch=%s\nbase=%s\nworkflow=%s\n'' "$TESTED_SHA" "$PATCH_SHA"
+        "$BASE_SHA" ''${{ github.workflow_sha }}''
 
         git show -s --format=fuller HEAD
 
         '
     - uses: ./.github/actions/setup-ci
+      if: always() && !cancelled()
     - name: Verify codex-rs Cargo manifests inherit workspace settings
       run: python3 .github/scripts/verify_cargo_workspace_manifests.py
+      if: always() && !cancelled()
     - name: Verify codex-tui does not import codex-core directly
       run: python3 .github/scripts/verify_tui_core_boundary.py
+      if: always() && !cancelled()
     - name: Verify Bazel clippy flags match Cargo workspace lints
       run: python3 .github/scripts/verify_bazel_clippy_lints.py
+      if: always() && !cancelled()
     - name: Install uv
       uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
       with:
         version: 0.11.3
+      if: always() && !cancelled()
     - name: Test downstream Python release resolution
       run: python3 -m unittest discover -s .github/scripts -p 'test_resolve_python_cli_release.py'
+      if: always() && !cancelled()
     - name: Test release version comparison
       run: python3 -m unittest discover -s .github/scripts -p 'test_releases.py'
+      if: always() && !cancelled()
     - name: Test PyPI release verification
-      run: uv run --no-project --with packaging==26.2 python -m unittest discover -s .github/scripts -p 'test_verify_pypi_release.py'
+      run: uv run --no-project --with packaging==26.2 python -m unittest discover
+        -s .github/scripts -p 'test_verify_pypi_release.py'
+      if: always() && !cancelled()
     - name: Test Codex package builder
       run: python3 -m unittest discover -s scripts/codex_package -p 'test_*.py'
+      if: always() && !cancelled()
     - name: Test standalone installer
       run: python3 -m unittest discover -s scripts/install -p 'test_*.py'
+      if: always() && !cancelled()
     - name: Test macOS signing and notarization
       run: python3 -m unittest discover -s .github/scripts/macos-signing -p 'test_*.py'
+      if: always() && !cancelled()
     - name: Setup pnpm
       uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288
       with:
         run_install: false
+      if: always() && !cancelled()
     - name: Setup Node.js
       uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
       with:
         node-version: 22
+      if: always() && !cancelled()
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
+      if: always() && !cancelled()
     - name: Ensure root README.md contains only ASCII and certain Unicode code points
       run: ./scripts/asciicheck.py README.md
+      if: always() && !cancelled()
     - name: Check root README ToC
       run: python3 scripts/readme_toc.py README.md
+      if: always() && !cancelled()
     - name: Check formatting (run `just fmt` to fix)
       run: just fmt-check
+      if: always() && !cancelled()
     - name: Prettier (run `pnpm run format:fix` to fix)
       run: pnpm run format
+      if: always() && !cancelled()
     - name: Check for a clean worktree
       if: always() && !cancelled()
       uses: ./.github/actions/check-clean-worktree
+'on':
+  workflow_call:
+    inputs:
+      target-sha:
+        type: string
+        required: true
+      patch-sha:
+        type: string
+        required: true
+      base-sha:
+        type: string
+        required: true
+      issue:
+        type: string
+        required: true

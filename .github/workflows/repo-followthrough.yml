@@ -1,0 +1,29 @@
+name: Repository checks with all failures visible
+'on':
+  push:
+    branches:
+    - codex/repo-validation-20261014
+permissions:
+  contents: read
+jobs:
+  issue-48124:
+    uses: ./.github/workflows/preflight-repo-checks.yml
+    with:
+      target-sha: b5ce68c8d11fb4fd68cf8aa05859100aacc44030
+      patch-sha: 7d0e3e03501e8aeac113a9d35b78d0243fd46723
+      base-sha: 7943713993c2220b7616b5fc71f2de0e503282e8
+      issue: '48124'
+  issue-53935:
+    uses: ./.github/workflows/preflight-repo-checks.yml
+    with:
+      target-sha: 704e674946cb9e5fda856030200028ac6b4f1eda
+      patch-sha: 18bb0ac24b18883cd95fc69bd8f1786672b1414b
+      base-sha: 7943713993c2220b7616b5fc71f2de0e503282e8
+      issue: '53935'
+  issue-54016:
+    uses: ./.github/workflows/preflight-repo-checks.yml
+    with:
+      target-sha: 445f67a303f66683c4ead05eadff0d471ceb91b3
+      patch-sha: 6315e98fd5dfe01fa1280262d2420712b29e834c
+      base-sha: 7943713993c2220b7616b5fc71f2de0e503282e8
+      issue: '54016'
