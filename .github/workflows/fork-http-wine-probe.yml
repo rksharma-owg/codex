@@ -1,0 +1,72 @@
+name: Isolated HTTP logging and Wine baseline probes
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: http
+          target: //codex-rs/http-client:http-client-unit-tests
+          repeats: 20
+        - name: wine
+          target: //bazel/rules/testing/wine:wine-test-support-unit-tests
+          repeats: 1
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: ab350de537ad87a2690e4d0678b216fc1c68db14
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Verify repaired baseline
+      shell: bash
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "ab350de537ad87a2690e4d0678b216fc1c68db14" ]]
+
+        printf "baseline=%s\nworkflow=%s\n" "ab350de537ad87a2690e4d0678b216fc1c68db14"
+        "${{ github.workflow_sha }}"
+
+        '
+    - uses: ./.github/actions/prepare-bazel-ci
+      with:
+        target: x86_64-unknown-linux-gnu
+        cache-scope: http-wine-isolation
+    - name: Configure storage for public native runners
+      shell: bash
+      run: "set -euo pipefail\n# Reclaim optional preinstalled SDKs that this Rust/Python/Node\
+        \ matrix does not use.\n# This runs only on the disposable hosted runner,\
+        \ outside the source checkout.\nif [[ \"$RUNNER_OS\" == Linux ]]; then\n \
+        \ sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc\nfi\n# Upstream\
+        \ remote CI also disables the duplicate local action cache.\nprintf '\\ncommon\
+        \ --disk_cache=\\n' >> \"$HOME/.bazelrc\"\ndf -h\nrc_log=\"$RUNNER_TEMP/fork-bazel-rc.log\"\
+        \nbazel info --announce_rc output_base 2>&1 | tee \"$rc_log\"\nlast_cache_option=\"\
+        $(grep -oE -- '--disk_cache=[^[:space:]]*' \"$rc_log\" | tail -n 1)\"\n[[\
+        \ \"$last_cache_option\" == --disk_cache= ]]\n"
+    - name: Isolated unchanged baseline regression
+      shell: bash
+      env:
+        TARGET: ${{ matrix.target }}
+        REPEATS: ${{ matrix.repeats }}
+      run: 'set -euo pipefail
+
+        ./.github/scripts/run-bazel-ci.sh --print-failed-action-summary --print-failed-test-logs
+        -- test --runs_per_test="$REPEATS" --test_output=all -- "$TARGET"
+
+        '
+    - name: Upload probe diagnostics
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      if: always() && !cancelled()
+      with:
+        name: probe-${{ matrix.name }}
+        path: ${{ runner.temp }}/bazel-execution-logs
+    - name: Clean worktree
+      uses: ./.github/actions/check-clean-worktree
+      if: always() && !cancelled()
+'on':
+  push:
+    branches:
+    - codex/ci-probe-http-wine-20261015
