@@ -117,11 +117,6 @@ async fn prepare_from_package(
             daemon.ensure_managed_codex_bin()?;
             return Ok(true);
         }
-    } else {
-        anyhow::ensure!(
-            previous_root.join("current").symlink_metadata().is_ok(),
-            "no daemon package is selected; run `codex app-server daemon start` first"
-        );
     }
     std::fs::create_dir_all(&root)?;
     anyhow::ensure!(
@@ -417,7 +412,10 @@ async fn prepare_from_package(
         )?;
         selected.wait_until_ready().await?;
     }
-    if let Err(error) = crate::release_pruning::prune(daemon, &root, settings).await {
+    // A missing selector cannot identify the previous release to retain during recovery.
+    if (mode != InstallMode::Replace || previous_release.is_some())
+        && let Err(error) = crate::release_pruning::prune(daemon, &root, settings).await
+    {
         tracing::debug!(%error, "skipped daemon release pruning");
     }
     Ok(true)
