@@ -1,0 +1,203 @@
+concurrency:
+  group: fork-preflight-54016-e03a79a021733ffa661d72272865bb129e37285a-${{ github.workflow }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+name: Retry interrupted V7 Linux Clippy for 54016
+'on':
+  push:
+    branches:
+    - codex/ci-v7-linux-clippy-retry-20261015
+jobs:
+  clippy:
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: ubuntu-24.04
+          target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    name: Bazel clippy on ${{ matrix.os }} for ${{ matrix.target }}
+    environment:
+      name: bazel
+      deployment: false
+    steps:
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
+      working-directory: ${{ github.workspace }}
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+        ref: e03a79a021733ffa661d72272865bb129e37285a
+        fetch-depth: 0
+    - name: Verify exact tested revision and merge parents
+      shell: bash
+      env:
+        TESTED_SHA: e03a79a021733ffa661d72272865bb129e37285a
+        PATCH_SHA: c66117aab2feb4465ac3dbef14254ed16f0a4334
+        BASE_SHA: 5923caad9b9a399be9f2a736045318bb9f91812a
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" ]]
+
+        git cat-file -e "$PATCH_SHA^{commit}"
+
+        git cat-file -e "$BASE_SHA^{commit}"
+
+        git merge-base --is-ancestor "$PATCH_SHA" HEAD
+
+        git merge-base --is-ancestor "$BASE_SHA" HEAD
+
+        printf ''tested=%s\npatch=%s\nbase=%s\nworkflow=%s\n'' "$TESTED_SHA" "$PATCH_SHA" "$BASE_SHA"
+        ''${{ github.workflow_sha }}''
+
+        git show -s --format=fuller HEAD
+
+        '
+    - name: Prepare Bazel CI
+      id: prepare_bazel
+      uses: ./.github/actions/prepare-bazel-ci
+      with:
+        target: ${{ matrix.target }}
+        cache-scope: bazel-${{ github.job }}
+    - name: Configure storage for public native runners
+      shell: bash
+      run: "set -euo pipefail\nif [[ \"$RUNNER_OS\" == Linux ]]; then\n  sudo rm -rf /usr/local/lib/android\
+        \ /usr/share/dotnet /opt/ghc\nfi\npython_cmd=python3\nif ! command -v \"$python_cmd\" >/dev/null\
+        \ 2>&1; then python_cmd=python; fi\ncpu=\"$(\"$python_cmd\" -c 'import os; print(max(1,min(4,os.cpu_count()\
+        \ or 2)))')\"\nprintf '\\ncommon --disk_cache=\\nbuild --jobs=%s\\ntest --local_test_jobs=0\\\
+        ntest --default_test_resources=cpu=%s\\n' \"$cpu\" \"$cpu\" >> \"$HOME/.bazelrc\"\nprintf 'Fork\
+        \ runner budget: build jobs=%s; tests reserve all %s configured CPUs\\n' \"$cpu\" \"$cpu\"\ndf\
+        \ -h\nrc_log=\"$RUNNER_TEMP/fork-bazel-rc.log\"\nbazel info --announce_rc output_base 2>&1 | tee\
+        \ \"$rc_log\"\nlast_cache_option=\"$(grep -oE -- '--disk_cache=[^[:space:]]*' \"$rc_log\" | tail\
+        \ -n 1)\"\n[[ \"$last_cache_option\" == --disk_cache= ]]\n\n\n# Install the fork-only launcher\
+        \ after Bazel setup, outside the source checkout.\nexport FORK_BUDGET_CPU=\"$cpu\"\n\"$python_cmd\"\
+        \ - <<'FORK_INSTALL_PY'\nimport os,sys,shutil,json\nfrom pathlib import Path\nroot=Path(os.environ['RUNNER_TEMP'])/'fork-bazel-bin'\n\
+        root.mkdir(exist_ok=True)\nreal=shutil.which('bazel')\nif not real: raise RuntimeError('Bazel\
+        \ setup did not install Bazel')\n(root/'bazel.py').write_text('#!/usr/bin/env python3\\n\"\"\"\
+        Fork-only resource limiter; preserve upstream options and target boundaries.\"\"\"\\nimport os\\\
+        nimport subprocess\\nimport sys\\n\\nargs = sys.argv[1:]\\ncommand = next((a for a in args if\
+        \ not a.startswith(\\'-\\')), \\'\\')\\nif command in {\\'build\\', \\'test\\', \\'coverage\\\
+        ', \\'run\\', \\'aquery\\', \\'cquery\\'}:\\n    budget = int(os.environ[\\'FORK_BAZEL_JOBS\\\
+        '])\\n    if not 1 <= budget <= 4:\\n        raise ValueError(f\\'Invalid fork action budget:\
+        \ {budget}\\')\\n    pos = args.index(\\'--\\') if \\'--\\' in args else len(args)\\n    args[pos:pos]\
+        \ = [f\\'--jobs={budget}\\', f\\'--local_resources=cpu={budget}\\', \\'--local_test_jobs=0\\',\
+        \ f\\'--default_test_resources=cpu={budget}\\', \\'--announce_rc\\']\\n    print(f\\'Fork Bazel\
+        \ enforced jobs={budget} for {command}\\', file=sys.stderr, flush=True)\\nsys.exit(subprocess.run([os.environ[\\\
+        'FORK_REAL_BAZEL\\'], *args]).returncode)\\n',encoding='utf-8')\n(root/'bazel').write_text('#!/usr/bin/env\
+        \ bash\\nexec '+__import__('shlex').quote(sys.executable.replace('\\\\','/'))+' '+__import__('shlex').quote(str(root/'bazel.py').replace('\\\
+        \\','/'))+' \"$@\"\\n',encoding='utf-8')\n(root/'bazel').chmod(0o755)\nlauncher=root/'bazel'\n\
+        if os.name=='nt':\n    import subprocess\n    source=root/'budget.cs'\n    source.write_text('using\
+        \ System;\\nusing System.Collections.Generic;\\nusing System.Diagnostics;\\nusing System.Text;\\\
+        n\\nclass ForkBazelBudget {\\n    // Quote for CreateProcess/CRT argument parsing; no command\
+        \ shell is involved.\\n    static string Quote(string value) {\\n        if (value.Length != 0\
+        \ && value.IndexOfAny(new char[] {\\' \\', \\'\\\\t\\', \\'\\\\n\\', \\'\\\\v\\', \\'\"\\'}) <\
+        \ 0)\\n            return value;\\n        var result = new StringBuilder(\"\\\\\"\");\\n    \
+        \    int slashes = 0;\\n        foreach (char c in value) {\\n            if (c == \\'\\\\\\\\\
+        \\') { slashes++; continue; }\\n            result.Append(\\'\\\\\\\\\\', c == \\'\"\\' ? slashes\
+        \ * 2 + 1 : slashes);\\n            result.Append(c);\\n            slashes = 0;\\n        }\\\
+        n        result.Append(\\'\\\\\\\\\\', slashes * 2);\\n        result.Append(\\'\"\\');\\n   \
+        \     return result.ToString();\\n    }\\n\\n    static int Main(string[] args) {\\n        var\
+        \ forwarded = new List<string>(args);\\n        string command = \"\";\\n        foreach (string\
+        \ arg in args) {\\n            if (!arg.StartsWith(\"-\")) { command = arg; break; }\\n      \
+        \  }\\n        if (command == \"build\" || command == \"test\" || command == \"coverage\" ||\\\
+        n            command == \"run\" || command == \"aquery\" || command == \"cquery\") {\\n      \
+        \      int budget = int.Parse(Environment.GetEnvironmentVariable(\"FORK_BAZEL_JOBS\"));\\n   \
+        \         if (budget < 1 || budget > 4) throw new ArgumentOutOfRangeException(\"FORK_BAZEL_JOBS\"\
+        );\\n            int pos = forwarded.IndexOf(\"--\");\\n            if (pos < 0) pos = forwarded.Count;\\\
+        n            forwarded.InsertRange(pos, new string[] {\"--jobs=\" + budget,\\n               \
+        \ \"--local_resources=cpu=\" + budget, \"--local_test_jobs=0\",\\n                \"--default_test_resources=cpu=\"\
+        \ + budget, \"--announce_rc\"});\\n            Console.Error.WriteLine(\"Fork Bazel enforced jobs=\"\
+        \ + budget + \" for \" + command);\\n        }\\n        var quoted = new List<string>();\\n \
+        \       foreach (string arg in forwarded) quoted.Add(Quote(arg));\\n        var info = new ProcessStartInfo(Environment.GetEnvironmentVariable(\"\
+        FORK_REAL_BAZEL\"),\\n            string.Join(\" \", quoted));\\n        info.UseShellExecute\
+        \ = false;\\n        using (var child = Process.Start(info)) {\\n            child.WaitForExit();\\\
+        n            return child.ExitCode;\\n        }\\n    }\\n}\\n',encoding='utf-8')\n    compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'\n\
+        \    if not compiler.is_file(): raise RuntimeError('Native .NET Framework C# compiler unavailable')\n\
+        \    launcher=root/'bazel.exe'\n    subprocess.run([str(compiler),'/nologo','/out:'+str(launcher),str(source)],check=True)\n\
+        with open(os.environ['GITHUB_ENV'],'a',encoding='utf-8') as stream:\n    stream.write('FORK_REAL_BAZEL='+real+'\\\
+        nFORK_BAZEL_JOBS='+os.environ['FORK_BUDGET_CPU']+'\\nCODEX_BAZEL_BIN='+str(launcher)+'\\n')\n\
+        with open(os.environ['GITHUB_PATH'],'a',encoding='utf-8') as stream: stream.write(str(root)+'\\\
+        n')\nprint(json.dumps({'real_bazel':real,'launcher':str(launcher),'jobs':os.environ['FORK_BUDGET_CPU']}))\n\
+        FORK_INSTALL_PY\n"
+    - name: Verify native fork budget through upstream Python wrapper
+      shell: bash
+      if: success()
+      run: "python - <<'FORK_CONTROL_PY'\n\"\"\"Exercise native subprocess launch through the actual upstream\
+        \ BuildBuddy wrapper.\"\"\"\nfrom pathlib import Path\nimport base64,json,os,shlex,subprocess,sys,tempfile\n\
+        with tempfile.TemporaryDirectory(prefix='fork budget control ',dir=os.environ.get('RUNNER_TEMP'))\
+        \ as tmp:\n    root=Path(tmp);capture=root/'capture.py';output=root/'captured.json'\n    capture.write_text(\"\
+        import json,os,sys\\nfrom pathlib import Path\\nPath(os.environ['CAPTURE_OUTPUT']).write_text(json.dumps(sys.argv[1:]))\\\
+        nsys.exit(int(os.environ.get('CAPTURE_EXIT','0')))\\n\")\n    fake=root/('real-bazel.exe' if os.name=='nt'\
+        \ else 'real-bazel')\n    if os.name=='nt':\n        source=root/'capture.cs'\n        source.write_text('using\
+        \ System; using System.IO; using System.Text; class Capture { static int Main(string[] args) {\
+        \ File.WriteAllLines(Environment.GetEnvironmentVariable(\"CAPTURE_OUTPUT\"), Array.ConvertAll(args,\
+        \ s => Convert.ToBase64String(Encoding.UTF8.GetBytes(s)))); return int.Parse(Environment.GetEnvironmentVariable(\"\
+        CAPTURE_EXIT\") ?? \"0\"); } }')\n        compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'\n\
+        \        subprocess.run([str(compiler),'/nologo','/out:'+str(fake),str(source)],check=True)\n\
+        \    else:\n        fake.write_text('#!/bin/sh\\nexec '+shlex.quote(sys.executable)+' '+shlex.quote(str(capture))+'\
+        \ \"$@\"\\n');fake.chmod(0o755)\n    env=dict(os.environ,FORK_REAL_BAZEL=str(fake),CAPTURE_OUTPUT=str(output),BUILDBUDDY_API_KEY='')\n\
+        \    wrapper=Path('.github/scripts/run_bazel_with_buildbuddy.py')\n    commands=[['build','--jobs=8','--','//:local_windows'],['test','--jobs=30','--local_test_jobs=2','--default_test_resources=cpu=1','--test_filter=some\
+        \ name','--','//some:target'],['query','--output=label','--','kind(\"rust_library rule\", //...)']]\n\
+        \    commands.append(['build','--jobs=8','--test_env=PATH='+'C:\\\\Program Files\\\\SDK\\\\bin;'*700,'--','//:local_windows'])\n\
+        \    commands.append(['test','--test_filter=spaces and \"quotes\" \\\\\\\\ tail\\\\','--','//some:target'])\n\
+        \    for command in commands:\n        result=subprocess.run([sys.executable,str(wrapper),*command],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)\n\
+        \        if os.environ.get('EXPECTED_CMD_LIMIT_FAILURE')=='1' and sum(map(len,command))>10000:\n\
+        \            if result.returncode==0 or 'The command line is too long' not in result.stdout:raise\
+        \ RuntimeError('CMD negative control did not reproduce command-length failure')\n            print('Expected\
+        \ CMD8191-character failure verified; no test-pass claim for rejected command')\n            sys.exit(0)\n\
+        \        print(result.stdout,end='')\n        if result.returncode:raise RuntimeError(f'Native\
+        \ wrapper failed: {result.returncode}')\n        got=[base64.b64decode(line).decode() for line\
+        \ in output.read_text().splitlines()] if os.name=='nt' else json.loads(output.read_text());pos=got.index('--')\n\
+        \        if command[0] in {'build','test'}:\n            jobs=[a for a in got[:pos] if a.startswith('--jobs=')]\n\
+        \            if jobs[-1]!='--jobs='+env['FORK_BAZEL_JOBS']:raise ValueError(got)\n           \
+        \ local=[a for a in got[:pos] if a.startswith('--local_test_jobs=')]\n            resources=[a\
+        \ for a in got[:pos] if a.startswith('--default_test_resources=cpu=')]\n            if local[-1]!='--local_test_jobs=0'\
+        \ or resources[-1]!='--default_test_resources=cpu='+env['FORK_BAZEL_JOBS']:raise ValueError(got)\n\
+        \            if got[pos:]!=command[command.index('--'):]:raise ValueError(got)\n        elif any(a.startswith('--jobs=')\
+        \ for a in got):raise ValueError(got)\n        for original in command[1:command.index('--')]:\n\
+        \            if original not in got:raise ValueError('Argument changed through native launcher')\n\
+        \        print(json.dumps({'platform':sys.platform,'command':command[0],'argument_count':len(got),'characters':sum(map(len,got)),'arguments_preserved':True}))\n\
+        \    env['CAPTURE_EXIT']='37'\n    result=subprocess.run([sys.executable,str(wrapper),'build','--jobs=8','--','//:local_windows'],env=env)\n\
+        \    if result.returncode!=37:raise ValueError(f'Child exit status changed: {result.returncode}')\n\
+        print('Native wrapper budget controls passed')\n\nFORK_CONTROL_PY\n"
+    - name: bazel build --config=clippy lint targets
+      env:
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      shell: bash
+      run: "bazel_clippy_args=(\n  --config=clippy\n  --build_metadata=COMMIT_SHA=e03a79a021733ffa661d72272865bb129e37285a\n\
+        \  --build_metadata=TAG_job=clippy\n)\nbazel_wrapper_args=()\nbazel_target_list_args=()\nif [[\
+        \ \"${RUNNER_OS}\" == \"Windows\" ]]; then\n  # Keep this aligned with the fast Windows Bazel\
+        \ test job: use\n  # Linux RBE for clippy build actions while targeting Windows\n  # gnullvm.\
+        \ Fork/community PRs without the BuildBuddy secret fall\n  # back inside `run-bazel-ci.sh` to\
+        \ the previous local Windows MSVC\n  # host-platform shape.\n  bazel_wrapper_args+=(--windows-cross-compile)\n\
+        \  bazel_target_list_args+=(--windows-cross-compile)\n  if [[ -z \"${BUILDBUDDY_API_KEY:-}\" ]];\
+        \ then\n    # The fork fallback can see incompatible explicit Windows-cross\n    # internal test\
+        \ binaries in the generated target list. Preserve\n    # the old local-fallback behavior there.\n\
+        \    bazel_clippy_args+=(--skip_incompatible_explicit_targets)\n  fi\nfi\n\nbazel_target_lines=\"\
+        $(./scripts/list-bazel-clippy-targets.sh \"${bazel_target_list_args[@]}\")\"\nbazel_targets=()\n\
+        while IFS= read -r target; do\n  bazel_targets+=(\"${target}\")\ndone <<< \"${bazel_target_lines}\"\
+        \n\n./.github/scripts/run-bazel-ci.sh \\\n  --print-failed-action-summary \\\n  \"${bazel_wrapper_args[@]}\"\
+        \ \\\n  -- \\\n  build \\\n  \"${bazel_clippy_args[@]}\" \\\n  -- \\\n  \"${bazel_targets[@]}\"\
+        \n"
+    - name: Upload Bazel execution logs
+      if: always() && !cancelled()
+      continue-on-error: true
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: 54016-bazel-execution-logs-clippy-${{ matrix.target }}
+        path: ${{ runner.temp }}/bazel-execution-logs
+        if-no-files-found: ignore
+    - name: Save bazel repository cache
+      if: always() && !cancelled() && steps.prepare_bazel.outputs.repository-cache-hit != 'true'
+      continue-on-error: true
+      uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7
+      with:
+        path: ${{ steps.prepare_bazel.outputs.repository-cache-path }}
+        key: ${{ steps.prepare_bazel.outputs.repository-cache-key }}
+    - name: Check for a clean worktree
+      if: always() && !cancelled()
+      uses: ./.github/actions/check-clean-worktree
+permissions:
+  contents: read
