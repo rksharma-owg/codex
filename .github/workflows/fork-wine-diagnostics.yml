@@ -1,0 +1,69 @@
+name: Wine startup failure diagnostics (unchanged source)
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: parallel
+          args: --test_arg=--nocapture
+        - name: powershell
+          args: --test_filter=pinned_powershell_runs_under_wine_with_a_pty --test_arg=--nocapture
+        - name: serial
+          args: --test_arg=--test-threads=1 --test_arg=--nocapture
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: 0dfd920c8f33b39b40362368279aaa80d74d5696
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Verify repaired baseline
+      shell: bash
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "0dfd920c8f33b39b40362368279aaa80d74d5696" ]]
+
+        printf "baseline=%s\nworkflow=%s\n" "0dfd920c8f33b39b40362368279aaa80d74d5696"
+        "${{ github.workflow_sha }}"
+
+        '
+    - uses: ./.github/actions/prepare-bazel-ci
+      with:
+        target: x86_64-unknown-linux-gnu
+        cache-scope: http-wine-isolation
+    - name: Configure storage for public native runners
+      shell: bash
+      run: "set -euo pipefail\n# Reclaim optional preinstalled SDKs that this Rust/Python/Node\
+        \ matrix does not use.\n# This runs only on the disposable hosted runner,\
+        \ outside the source checkout.\nif [[ \"$RUNNER_OS\" == Linux ]]; then\n \
+        \ sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc\nfi\n# Upstream\
+        \ remote CI also disables the duplicate local action cache.\nprintf '\\ncommon\
+        \ --disk_cache=\\n' >> \"$HOME/.bazelrc\"\ndf -h\nrc_log=\"$RUNNER_TEMP/fork-bazel-rc.log\"\
+        \nbazel info --announce_rc output_base 2>&1 | tee \"$rc_log\"\nlast_cache_option=\"\
+        $(grep -oE -- '--disk_cache=[^[:space:]]*' \"$rc_log\" | tail -n 1)\"\n[[\
+        \ \"$last_cache_option\" == --disk_cache= ]]\n"
+    - name: Capture unchanged Wine errors immediately
+      shell: bash
+      env:
+        DIAGNOSTIC_ARGS: ${{ matrix.args }}
+      run: |
+        set -euo pipefail
+        read -ra diagnostic_args <<< "$DIAGNOSTIC_ARGS"
+        ./.github/scripts/run-bazel-ci.sh --print-failed-action-summary --print-failed-test-logs -- test --jobs=4 --local_test_jobs=1 --test_output=all --runs_per_test=3 "${diagnostic_args[@]}" -- //bazel/rules/testing/wine:wine-test-support-unit-tests
+    - name: Upload probe diagnostics
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      if: always() && !cancelled()
+      with:
+        name: probe-${{ matrix.name }}
+        path: ${{ runner.temp }}/bazel-execution-logs
+    - name: Clean worktree
+      uses: ./.github/actions/check-clean-worktree
+      if: always() && !cancelled()
+'on':
+  push:
+    branches:
+    - codex/ci-wine-diagnostics-20261015
