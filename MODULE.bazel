@@ -177,6 +177,13 @@ single_version_override(
 
 bazel_dep(name = "rules_python", version = "2.4.2")
 
+# Keep verified source-archive hashes when pip builds wheels in hash-required mode.
+single_version_override(
+    module_name = "rules_python",
+    patch_strip = 1,
+    patches = ["//patches:rules_python_sdist_requirement_hash.patch"],
+)
+
 voice_python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 voice_python.defaults(python_version = "3.11")
 voice_python.toolchain(python_version = "3.12")
