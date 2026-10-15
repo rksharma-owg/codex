@@ -17,7 +17,7 @@ jobs:
         - name: baseline
           sha: bb64b894fd67158be0f874872e6d7bfe717e7368
         - name: fixed
-          sha: fe3b5f49d7ad43a72ee4e2bbd516280a38857785
+          sha: 5451bfb0e14b7b2978b994ab4cde5f7b7bbcc35b
     env:
       RUST_MIN_STACK: '8388608'
     steps:
