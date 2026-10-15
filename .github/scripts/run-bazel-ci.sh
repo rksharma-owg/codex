@@ -309,7 +309,7 @@ if [[ "${RUNNER_OS:-}" == "Windows" && $windows_cross_compile -eq 1 && -z "${BUI
       break
     fi
   done
-  if [[ $has_target_platform_override -eq 0 ]]; then
+  if [[ $has_target_platform_override -eq 0 && $has_host_platform_override -eq 0 ]]; then
     post_config_bazel_args+=(--config=ci-windows-msvc)
   fi
   post_config_bazel_args+=(--jobs=8)
