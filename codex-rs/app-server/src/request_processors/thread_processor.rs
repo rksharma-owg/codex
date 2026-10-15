@@ -4583,10 +4583,13 @@ impl ThreadRequestProcessor {
                     existing_thread.multi_agent_version(),
                     &config_snapshot.session_source,
                 ) && !has_subscribers
-                    && matches!(loaded_status, ThreadStatus::Idle)
+                    && matches!(
+                        loaded_status,
+                        ThreadStatus::Idle | ThreadStatus::SystemError
+                    )
                     && !is_running
                 {
-                    // A loaded idle thread is only a cache entry. Shut it down
+                    // A loaded, settled thread is only a cache entry. Shut it down
                     // before removing it so cold resume cannot duplicate a
                     // thread that timed out during shutdown.
                     match wait_for_thread_shutdown(&existing_thread).await {
