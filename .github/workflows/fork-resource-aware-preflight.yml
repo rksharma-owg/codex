@@ -144,7 +144,12 @@ jobs:
         if [[ "$RUNNER_OS" == Windows ]]; then wrapper_args+=(--windows-cross-compile); fi
 
         ./.github/scripts/run-bazel-ci.sh "${wrapper_args[@]}" --print-failed-action-summary --print-failed-test-logs
-        -- test --test_output=all -- //codex-rs/utils/rustls-provider:rustls-provider-unit-tests
+        -- test --test_output=all -- //codex-rs/utils/rustls-provider:rustls-provider-preinstalled-test 2>&1 | tee
+        "$RUNNER_TEMP/resource-test.log"
+
+        grep -F "test ensure_provider_preserves_preinstalled_provider ... ok" "$RUNNER_TEMP/resource-test.log"
+
+        grep -F "1 passed; 0 failed;" "$RUNNER_TEMP/resource-test.log"
 
         '
     - uses: ./.github/actions/check-clean-worktree
