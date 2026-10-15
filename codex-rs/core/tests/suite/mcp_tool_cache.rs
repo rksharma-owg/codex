@@ -588,6 +588,9 @@ async fn cached_mcp_startup_is_eager_for_root_and_lazy_for_subagents() -> anyhow
     );
     skip_if_no_network!(Ok(()));
 
+    // Keep first use on another thread from caching no tracing interest.
+    let _interest_cache_guard =
+        tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
     let binding_captures = Arc::new(AtomicUsize::new(0));
     let _tracing = tracing_subscriber::registry()
         .with(McpBindingCaptureCounter(Arc::clone(&binding_captures)))
