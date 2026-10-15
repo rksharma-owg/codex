@@ -1,0 +1,29 @@
+name: All three patches - full repaired baseline CI
+'on':
+  push:
+    branches:
+    - codex/full-validation-20261015
+permissions:
+  contents: read
+jobs:
+  issue-48124:
+    uses: ./.github/workflows/preflight-blocking-ci.yml
+    with:
+      target-sha: d9af1eb49f45512abd50b82ec70fdf6a034510e6
+      patch-sha: d8ff80f3301548f06bd128722e97a5a926446bca
+      base-sha: 6f3af8adfb5b7e11a961abb250fd58b1685ee1fb
+      issue: '48124'
+  issue-53935:
+    uses: ./.github/workflows/preflight-blocking-ci.yml
+    with:
+      target-sha: 2f66d6e887a5c54e3b9386e2cbfbc90d13eb5554
+      patch-sha: 18bb0ac24b18883cd95fc69bd8f1786672b1414b
+      base-sha: 6f3af8adfb5b7e11a961abb250fd58b1685ee1fb
+      issue: '53935'
+  issue-54016:
+    uses: ./.github/workflows/preflight-blocking-ci.yml
+    with:
+      target-sha: 1d7f329e394a469b0f21e997358da347116fc4cc
+      patch-sha: c66117aab2feb4465ac3dbef14254ed16f0a4334
+      base-sha: 6f3af8adfb5b7e11a961abb250fd58b1685ee1fb
+      issue: '54016'
