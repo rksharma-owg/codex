@@ -1,0 +1,178 @@
+name: Fork preflight - sdk
+on:
+  workflow_call:
+    inputs:
+      target-sha:
+        type: string
+        required: !!bool 'true'
+      patch-sha:
+        type: string
+        required: !!bool 'true'
+      base-sha:
+        type: string
+        required: !!bool 'true'
+      issue:
+        type: string
+        required: !!bool 'true'
+jobs:
+  python-sdk-installation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: !!bool 'false'
+        ref: ${{ inputs.target-sha }}
+        fetch-depth: 0
+    - name: Verify exact tested revision and merge parents
+      shell: bash
+      env:
+        TESTED_SHA: ${{ inputs.target-sha }}
+        PATCH_SHA: ${{ inputs.patch-sha }}
+        BASE_SHA: ${{ inputs.base-sha }}
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" ]]
+
+        git cat-file -e "$PATCH_SHA^{commit}"
+
+        git cat-file -e "$BASE_SHA^{commit}"
+
+        git merge-base --is-ancestor "$PATCH_SHA" HEAD
+
+        git merge-base --is-ancestor "$BASE_SHA" HEAD
+
+        printf ''tested=%s\npatch=%s\nbase=%s\nworkflow=%s\n'' "$TESTED_SHA" "$PATCH_SHA" "$BASE_SHA" ''${{ github.workflow_sha
+        }}''
+
+        git show -s --format=fuller HEAD
+
+        '
+    - name: Test the installed Python SDK and its default runtime
+      shell: bash
+      run: "set -euo pipefail\ndocker run --rm \\\n  --user \"$(id -u):$(id -g)\" \\\n  -e HOME=/tmp/codex-python-sdk-home\
+        \ \\\n  -e UV_LINK_MODE=copy \\\n  -v \"${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}\" \\\n  -w \"${GITHUB_WORKSPACE}/sdk/python\"\
+        \ \\\n  python:3.12-slim \\\n  sh -euxc '\n    python -m venv /tmp/build\n    /tmp/build/bin/python -m pip install\
+        \ uv==0.11.3\n    /tmp/build/bin/uv build --wheel --out-dir /tmp/dist\n    python -m venv /tmp/installed\n    /tmp/build/bin/uv\
+        \ pip install --python /tmp/installed/bin/python /tmp/dist/*.whl\n    env -u PYTHONPATH -u CODEX_EXEC_PATH /tmp/installed/bin/python\
+        \ tests/installed_sdk_smoke.py\n  '\n"
+  sdks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: bazel
+      deployment: !!bool 'false'
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: !!bool 'false'
+        ref: ${{ inputs.target-sha }}
+        fetch-depth: 0
+    - name: Verify exact tested revision and merge parents
+      shell: bash
+      env:
+        TESTED_SHA: ${{ inputs.target-sha }}
+        PATCH_SHA: ${{ inputs.patch-sha }}
+        BASE_SHA: ${{ inputs.base-sha }}
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" ]]
+
+        git cat-file -e "$PATCH_SHA^{commit}"
+
+        git cat-file -e "$BASE_SHA^{commit}"
+
+        git merge-base --is-ancestor "$PATCH_SHA" HEAD
+
+        git merge-base --is-ancestor "$BASE_SHA" HEAD
+
+        printf ''tested=%s\npatch=%s\nbase=%s\nworkflow=%s\n'' "$TESTED_SHA" "$PATCH_SHA" "$BASE_SHA" ''${{ github.workflow_sha
+        }}''
+
+        git show -s --format=fuller HEAD
+
+        '
+    - name: Install Linux bwrap build dependencies
+      shell: bash
+      run: 'set -euo pipefail
+
+        sudo apt-get update -y
+
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev
+
+        '
+    - name: Setup pnpm
+      uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288
+      with:
+        run_install: !!bool 'false'
+    - name: Setup Node.js
+      uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+      with:
+        node-version: 22
+        cache: pnpm
+    - name: Prepare Bazel CI
+      id: setup_bazel
+      uses: ./.github/actions/prepare-bazel-ci
+      with:
+        target: x86_64-unknown-linux-gnu
+        cache-scope: sdk
+    - name: Build codex and the code-mode host with Bazel
+      id: build_bazel
+      env:
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      shell: bash
+      run: "set -euo pipefail\n# Use the shared CI wrapper so fork PRs fall back cleanly when\n# BuildBuddy credentials are\
+        \ unavailable. This workflow needs the\n# built binaries on disk afterwards, so ask the wrapper to override\n# CI's\
+        \ default remote_download_minimal behavior.\n./.github/scripts/run-bazel-ci.sh \\\n  --remote-download-toplevel \\\
+        \n  -- \\\n  build \\\n  --build_metadata=COMMIT_SHA=${{ inputs.target-sha }} \\\n  --build_metadata=TAG_job=sdk \\\
+        \n  -- \\\n  //codex-rs/cli:codex \\\n  //codex-rs/code-mode-host:codex-code-mode-host\n\ncquery_output=\"$(\n  ./.github/scripts/run-bazel-ci.sh\
+        \ \\\n    -- \\\n    cquery \\\n    --output=files \\\n    -- \\\n    'set(//codex-rs/cli:codex //codex-rs/code-mode-host:codex-code-mode-host)'\
+        \ \\\n    | grep -E '^(/|bazel-out/)'\n)\"\nmapfile -t bazel_output_paths <<< \"${cquery_output}\"\nif [[ ${#bazel_output_paths[@]}\
+        \ -ne 2 ]]; then\n  echo \"Expected both Bazel-built binaries, found ${#bazel_output_paths[@]}.\" >&2\n  exit 1\n\
+        fi\n\n# Stage both binaries together so the CLI can discover its sibling\n# code-mode host while the SDK tests spawn\
+        \ the CLI directly.\ninstall_dir=\"${GITHUB_WORKSPACE}/.tmp/sdk-ci\"\nmkdir -p \"${install_dir}\"\ninstall -m 755\
+        \ \"${bazel_output_paths[@]}\" \"${install_dir}\"\necho \"CODEX_EXEC_PATH=${install_dir}/codex\" >> \"$GITHUB_ENV\"\
+        \n"
+    - name: Warm up Bazel-built codex
+      shell: bash
+      run: 'set -euo pipefail
+
+        "${CODEX_EXEC_PATH}" --version
+
+        '
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+    - name: Build SDK packages
+      run: pnpm -r --filter ./sdk/typescript run build
+    - name: Lint SDK packages
+      run: pnpm -r --filter ./sdk/typescript run lint
+    - name: Test SDK packages
+      run: pnpm -r --filter ./sdk/typescript run test
+    - name: Install uv
+      uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      with:
+        version: 0.11.3
+    - name: Test Python SDK against the same CLI
+      working-directory: sdk/python
+      run: 'uv sync --only-group dev --frozen
+
+        uv run --only-group dev --frozen --no-sync ruff check --output-format=github .
+
+        uv run --only-group dev --frozen --no-sync ruff format --check .
+
+        uv run --only-group dev --frozen --no-sync pytest
+
+        '
+    - name: Save bazel repository cache
+      if: always() && !cancelled() && steps.build_bazel.outcome == 'success' && steps.setup_bazel.outputs.repository-cache-hit
+        != 'true'
+      continue-on-error: !!bool 'true'
+      uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7
+      with:
+        path: ${{ steps.setup_bazel.outputs.repository-cache-path }}
+        key: ${{ steps.setup_bazel.outputs.repository-cache-key }}
+    - name: Check for a clean worktree
+      if: always() && !cancelled()
+      uses: ./.github/actions/check-clean-worktree
