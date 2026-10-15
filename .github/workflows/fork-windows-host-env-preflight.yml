@@ -1,0 +1,72 @@
+name: Windows MXC host-environment red green
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: baseline
+          source: 44166665bd8f8988aa9c2445ed49778e62d2bd88
+          expected: failure
+        - name: fixed
+          source: 8a65060b2a1a127e6aeaf022c26b0c0d530ab517
+          expected: success
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: ${{ matrix.source }}
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Verify repaired baseline
+      shell: bash
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$SOURCE" ]]
+
+        printf "tested=%s\nworkflow=%s\n" "$SOURCE" "${{ github.workflow_sha }}"
+
+        '
+      env:
+        SOURCE: ${{ matrix.source }}
+    - uses: ./.github/actions/prepare-bazel-ci
+      with:
+        target: x86_64-pc-windows-msvc
+        cache-scope: mxc-profile-probe
+    - name: Configure storage for public native runners
+      shell: bash
+      run: "set -euo pipefail\n# Reclaim optional preinstalled SDKs that this Rust/Python/Node matrix does not use.\n\
+        # This runs only on the disposable hosted runner, outside the source checkout.\nif [[ \"$RUNNER_OS\" ==\
+        \ Linux ]]; then\n  sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc\nfi\n# Upstream remote\
+        \ CI also disables the duplicate local action cache.\nprintf '\\ncommon --disk_cache=\\n' >> \"$HOME/.bazelrc\"\
+        \ndf -h\nrc_log=\"$RUNNER_TEMP/fork-bazel-rc.log\"\nbazel info --announce_rc output_base 2>&1 | tee \"$rc_log\"\
+        \nlast_cache_option=\"$(grep -oE -- '--disk_cache=[^[:space:]]*' \"$rc_log\" | tail -n 1)\"\n[[ \"$last_cache_option\"\
+        \ == --disk_cache= ]]\n"
+    - name: Existing complete MXC regression suite
+      shell: bash
+      env:
+        EXPECTED: ${{ matrix.expected }}
+      run: "set -euo pipefail\nset +e\n./.github/scripts/run-bazel-ci.sh --print-failed-action-summary --print-failed-test-logs\
+        \ -- test --test_output=all -- //codex-rs/mxc-sandbox:mxc-sandbox-unit-tests 2>&1 | tee \"$RUNNER_TEMP/mxc-tests.log\"\
+        \nstatus=${PIPESTATUS[0]}\nset -e\nif [[ \"$EXPECTED\" == failure ]]; then\n  [[ \"$status\" != 0 ]]\n \
+        \ grep -F 'MXC requires nonempty Unicode host LOCALAPPDATA' \"$RUNNER_TEMP/mxc-tests.log\"\n  grep -F '17\
+        \ passed; 3 failed;' \"$RUNNER_TEMP/mxc-tests.log\"\nelse\n  [[ \"$status\" == 0 ]]\n  grep -F '20 passed;\
+        \ 0 failed;' \"$RUNNER_TEMP/mxc-tests.log\"\nfi\n"
+    - name: Upload probe diagnostics
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      if: always() && !cancelled()
+      with:
+        name: mxc-environment-${{ matrix.name }}
+        path: '${{ runner.temp }}/mxc-tests.log
+
+          ${{ runner.temp }}/bazel-execution-logs'
+    - name: Clean worktree
+      uses: ./.github/actions/check-clean-worktree
+      if: always() && !cancelled()
+'on':
+  push:
+    branches:
+    - codex/ci-windows-host-env-preflight-20261015
