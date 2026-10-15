@@ -1,0 +1,126 @@
+name: Fork preflight - blocking-ci
+'on':
+  workflow_call:
+    inputs:
+      target-sha:
+        type: string
+        required: true
+      patch-sha:
+        type: string
+        required: true
+      base-sha:
+        type: string
+        required: true
+      issue:
+        type: string
+        required: true
+jobs:
+  bazel:
+    name: Bazel
+    uses: ./.github/workflows/preflight-bazel.yml
+    secrets: inherit
+    with:
+      target-sha: ${{ inputs.target-sha }}
+      patch-sha: ${{ inputs.patch-sha }}
+      base-sha: ${{ inputs.base-sha }}
+      issue: ${{ inputs.issue }}
+  blob-size-policy:
+    name: Blob size policy
+    uses: ./.github/workflows/preflight-blob-size-policy.yml
+    secrets: inherit
+    with:
+      target-sha: ${{ inputs.target-sha }}
+      patch-sha: ${{ inputs.patch-sha }}
+      base-sha: ${{ inputs.base-sha }}
+      issue: ${{ inputs.issue }}
+  cargo-deny:
+    name: cargo-deny
+    uses: ./.github/workflows/preflight-cargo-deny.yml
+    secrets: inherit
+    with:
+      target-sha: ${{ inputs.target-sha }}
+      patch-sha: ${{ inputs.patch-sha }}
+      base-sha: ${{ inputs.base-sha }}
+      issue: ${{ inputs.issue }}
+  codespell:
+    name: Codespell
+    uses: ./.github/workflows/preflight-codespell.yml
+    secrets: inherit
+    with:
+      target-sha: ${{ inputs.target-sha }}
+      patch-sha: ${{ inputs.patch-sha }}
+      base-sha: ${{ inputs.base-sha }}
+      issue: ${{ inputs.issue }}
+  repo-checks:
+    name: repo-checks
+    uses: ./.github/workflows/preflight-repo-checks.yml
+    secrets: inherit
+    with:
+      target-sha: ${{ inputs.target-sha }}
+      patch-sha: ${{ inputs.patch-sha }}
+      base-sha: ${{ inputs.base-sha }}
+      issue: ${{ inputs.issue }}
+  rust-ci:
+    name: rust-ci
+    uses: ./.github/workflows/preflight-rust-ci.yml
+    secrets: inherit
+    with:
+      target-sha: ${{ inputs.target-sha }}
+      patch-sha: ${{ inputs.patch-sha }}
+      base-sha: ${{ inputs.base-sha }}
+      issue: ${{ inputs.issue }}
+  sdk:
+    name: sdk
+    uses: ./.github/workflows/preflight-sdk.yml
+    secrets: inherit
+    with:
+      target-sha: ${{ inputs.target-sha }}
+      patch-sha: ${{ inputs.patch-sha }}
+      base-sha: ${{ inputs.base-sha }}
+      issue: ${{ inputs.issue }}
+  required:
+    name: CI required
+    if: ${{ always() }}
+    needs:
+    - bazel
+    - blob-size-policy
+    - cargo-deny
+    - codespell
+    - repo-checks
+    - rust-ci
+    - sdk
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+        ref: ${{ inputs.target-sha }}
+        fetch-depth: 0
+    - name: Verify exact tested revision and merge parents
+      shell: bash
+      env:
+        TESTED_SHA: ${{ inputs.target-sha }}
+        PATCH_SHA: ${{ inputs.patch-sha }}
+        BASE_SHA: ${{ inputs.base-sha }}
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" ]]
+
+        git cat-file -e "$PATCH_SHA^{commit}"
+
+        git cat-file -e "$BASE_SHA^{commit}"
+
+        git merge-base --is-ancestor "$PATCH_SHA" HEAD
+
+        git merge-base --is-ancestor "$BASE_SHA" HEAD
+
+        printf ''tested=%s\npatch=%s\nbase=%s\nworkflow=%s\n'' "$TESTED_SHA" "$PATCH_SHA" "$BASE_SHA" ''${{ github.workflow_sha
+        }}''
+
+        git show -s --format=fuller HEAD
+
+        '
+    - name: Require successful dependencies
+      env:
+        NEEDS: ${{ toJSON(needs) }}
+      run: python3 .github/scripts/check_ci_results.py
