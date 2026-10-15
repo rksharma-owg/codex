@@ -1,0 +1,69 @@
+name: Fork preflight - cargo-deny
+'on':
+  workflow_call:
+    inputs:
+      target-sha:
+        type: string
+        required: true
+      patch-sha:
+        type: string
+        required: true
+      base-sha:
+        type: string
+        required: true
+      issue:
+        type: string
+        required: true
+jobs:
+  cargo-deny:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./codex-rs
+    steps:
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
+      working-directory: ${{ github.workspace }}
+    - name: Checkout
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+        ref: ${{ inputs.target-sha }}
+        fetch-depth: 0
+    - name: Verify exact tested revision and merge parents
+      shell: bash
+      env:
+        TESTED_SHA: ${{ inputs.target-sha }}
+        PATCH_SHA: ${{ inputs.patch-sha }}
+        BASE_SHA: ${{ inputs.base-sha }}
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$TESTED_SHA" ]]
+
+        git cat-file -e "$PATCH_SHA^{commit}"
+
+        git cat-file -e "$BASE_SHA^{commit}"
+
+        git merge-base --is-ancestor "$PATCH_SHA" HEAD
+
+        git merge-base --is-ancestor "$BASE_SHA" HEAD
+
+        printf ''tested=%s\npatch=%s\nbase=%s\nworkflow=%s\n'' "$TESTED_SHA" "$PATCH_SHA" "$BASE_SHA" ''${{ github.workflow_sha
+        }}''
+
+        git show -s --format=fuller HEAD
+
+        '
+    - uses: ./.github/actions/setup-ci
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+    - name: Run cargo-deny
+      uses: EmbarkStudios/cargo-deny-action@82eb9f621fbc699dd0918f3ea06864c14cc84246
+      with:
+        rust-version: 1.95.0
+        manifest-path: ./codex-rs/Cargo.toml
+    - name: Check for a clean worktree
+      if: always() && !cancelled()
+      uses: ./.github/actions/check-clean-worktree
