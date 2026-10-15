@@ -1,0 +1,67 @@
+name: Rust1.95 Cargo pruning baseline versus daemon patch
+'on':
+  push:
+    branches:
+    - codex/ci-pruning-cargo-probe-20261015
+permissions:
+  contents: read
+jobs:
+  probe:
+    name: ${{ matrix.case.name }} Cargo pruning repeat
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+        - name: baseline
+          sha: 58c56d1ec79988435f170e3248728c19e77b477f
+        - name: daemon-patch
+          sha: 882220072a07dcac54b01577e57c0adfdffae20c
+    env:
+      RUST_MIN_STACK: '8388608'
+      CARGO_INCREMENTAL: '0'
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: ${{ matrix.case.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Verify diagnostic source
+      shell: bash
+      env:
+        TESTED: ${{ matrix.case.sha }}
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$TESTED" ]]
+
+        printf "tested=%s\nworkflow=%s\n" "$TESTED" "${{ github.workflow_sha }}"
+
+        '
+    - uses: ./.github/actions/setup-ci
+    - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      with:
+        components: rustfmt,clippy,rust-src
+    - name: Verify pinned Rust
+      shell: bash
+      run: 'rustc --version --verbose
+
+        cargo --version
+
+        rustc --version | grep -F "rustc 1.95.0 "'
+    - name: Linux build dependencies
+      run: sudo apt-get update && sudo apt-get install -y pkg-config libcap-dev
+    - name: Repeat full daemon suite under Cargo
+      shell: bash
+      run: "set -euo pipefail\nfor attempt in $(seq 1 20); do\n  printf \"DAEMON_SUITE_ATTEMPT=%s\\\
+        n\" \"$attempt\"\n  cargo test --locked -p codex-app-server-daemon --lib\n\
+        done\n"
+    - name: Strict Clippy including tests
+      if: always() && !cancelled()
+      run: cargo clippy --locked -p codex-app-server-daemon --tests -- -D warnings
+    - name: Clean worktree
+      uses: ./.github/actions/check-clean-worktree
+      if: always() && !cancelled()
