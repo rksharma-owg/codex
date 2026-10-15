@@ -1,0 +1,22 @@
+name: Corrected patches - upstream blocking checks
+'on':
+  push:
+    branches:
+    - codex/final-validation-20261014
+permissions:
+  contents: read
+jobs:
+  issue-48124:
+    uses: ./.github/workflows/preflight-blocking-ci.yml
+    with:
+      target-sha: d2a14ae06d733a17a407c0a86794fa797f7025a0
+      patch-sha: d8ff80f3301548f06bd128722e97a5a926446bca
+      base-sha: 7943713993c2220b7616b5fc71f2de0e503282e8
+      issue: '48124'
+  issue-54016:
+    uses: ./.github/workflows/preflight-blocking-ci.yml
+    with:
+      target-sha: 1d735873cb9e40c8d40db2fbff125accfe360ffd
+      patch-sha: c66117aab2feb4465ac3dbef14254ed16f0a4334
+      base-sha: 7943713993c2220b7616b5fc71f2de0e503282e8
+      issue: '54016'

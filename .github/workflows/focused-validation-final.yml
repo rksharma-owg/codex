@@ -1,0 +1,99 @@
+name: Corrected patches - pinned Rust 1.95
+'on':
+  push:
+    branches:
+    - codex/final-validation-20261014
+permissions:
+  contents: read
+jobs:
+  focused:
+    name: ${{ matrix.patch.issue }} Rust 1.95 on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - ubuntu-24.04
+        - macos-15
+        - windows-latest
+        patch:
+        - issue: '48124'
+          branch: fix/reject-invalid-codex-home
+          package: codex-utils-home-dir
+          head: d8ff80f3301548f06bd128722e97a5a926446bca
+          base: 7943713993c2220b7616b5fc71f2de0e503282e8
+          merge: d2a14ae06d733a17a407c0a86794fa797f7025a0
+        - issue: '53935'
+          branch: fix/recover-missing-daemon-selection
+          package: codex-app-server-daemon
+          head: 18bb0ac24b18883cd95fc69bd8f1786672b1414b
+          base: 7943713993c2220b7616b5fc71f2de0e503282e8
+          merge: 704e674946cb9e5fda856030200028ac6b4f1eda
+        - issue: '54016'
+          branch: fix/resume-settled-error-overrides
+          package: codex-app-server
+          head: c66117aab2feb4465ac3dbef14254ed16f0a4334
+          base: 7943713993c2220b7616b5fc71f2de0e503282e8
+          merge: 1d735873cb9e40c8d40db2fbff125accfe360ffd
+    env:
+      RUST_MIN_STACK: '8388608'
+      CARGO_INCREMENTAL: '0'
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: ${{ matrix.patch.merge }}
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Verify tested code
+      shell: bash
+      env:
+        PATCH: ${{ matrix.patch.head }}
+        TESTED: ${{ matrix.patch.merge }}
+        BASE: ${{ matrix.patch.base }}
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$TESTED" ]]
+
+        git merge-base --is-ancestor "$PATCH" HEAD
+
+        git merge-base --is-ancestor "$BASE" HEAD
+
+        printf "tested=%s\npatch=%s\nbase=%s\n" "$TESTED" "$PATCH" "$BASE"
+
+        '
+    - uses: ./.github/actions/setup-ci
+    - name: Install pinned Rust
+      uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      with:
+        components: rustfmt,clippy,rust-src
+    - name: Verify pinned Rust version
+      shell: bash
+      run: 'rustc --version --verbose
+
+        cargo --version
+
+        rustc --version | grep -F "rustc 1.95.0 "'
+    - name: Linux build dependencies
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y pkg-config libcap-dev
+    - name: Formatting
+      run: cargo fmt -- --config imports_granularity=Item --check
+    - name: Regression and crate tests
+      shell: bash
+      env:
+        ISSUE: ${{ matrix.patch.issue }}
+        PACKAGE: ${{ matrix.patch.package }}
+      run: "set -euo pipefail\nif [[ \"$ISSUE\" == 54016 ]]; then\n  cargo test --locked\
+        \ -p \"$PACKAGE\" --test resume_system_error\nelif [[ \"$ISSUE\" == 53935\
+        \ ]]; then\n  cargo test --locked -p \"$PACKAGE\" --lib\nelse\n  cargo test\
+        \ --locked -p \"$PACKAGE\"\nfi\n"
+    - name: Clippy including tests
+      if: always() && !cancelled()
+      run: cargo clippy --locked -p ${{ matrix.patch.package }} --tests
+    - name: Clean worktree
+      if: always() && !cancelled()
+      uses: ./.github/actions/check-clean-worktree
