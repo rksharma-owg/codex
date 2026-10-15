@@ -1,0 +1,139 @@
+name: Actual generated Windows launcher newline A/B
+'on':
+  push:
+    branches:
+    - codex/ci-generated-launcher-newline-ab-20261015
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: 44166665bd8f8988aa9c2445ed49778e62d2bd88
+        persist-credentials: false
+    - name: Actual template LF and CRLF against native fixture
+      shell: python
+      run: "from pathlib import Path\nimport os,subprocess,json,re,shutil\nbase=Path(os.environ['RUNNER_TEMP'])/'generated\
+        \ launcher fixture';base.mkdir()\nmetadata=json.loads('{\"templateContent\": \"@echo off\\\\nsetlocal EnableExtensions\
+        \ EnableDelayedExpansion\\\\n\\\\ncall :resolve_runfile \\\\\"__WORKSPACE_ROOT_MARKER__\\\\\"\\\\nif errorlevel\
+        \ 1 exit /b 1\\\\nset \\\\\"workspace_root_marker=!resolve_runfile_result!\\\\\"\\\\n\\\\nfor %%I in (\\\
+        \\\"%workspace_root_marker%\\\\\") do set \\\\\"workspace_root_marker_dir=%%~dpI\\\\\"\\\\nfor %%I in (\\\
+        \\\"%workspace_root_marker_dir%..\\\\\\\\..\\\\\") do set \\\\\"workspace_root=%%~fI\\\\\"\\\\n\\\\ncall\
+        \ :resolve_runfile \\\\\"__TEST_BIN__\\\\\"\\\\nif errorlevel 1 exit /b 1\\\\nset \\\\\"test_bin=!resolve_runfile_result!\\\
+        \\\"\\\\n\\\\n__RUNFILE_ENV_EXPORTS__\\\\n\\\\nif not defined test_bin (\\\\n  >&2 echo resolved test binary\
+        \ was lost while exporting runfile environment variables\\\\n  exit /b 1\\\\n)\\\\n\\\\n__WORKSPACE_ROOT_SETUP__\\\
+        \\n\\\\nset \\\\\"TOTAL_SHARDS=%RULES_RUST_TEST_TOTAL_SHARDS%\\\\\"\\\\nif not defined TOTAL_SHARDS set\
+        \ \\\\\"TOTAL_SHARDS=%TEST_TOTAL_SHARDS%\\\\\"\\\\nif defined TESTBRIDGE_TEST_ONLY if \\\\\"%~1\\\\\"==\\\
+        \\\"\\\\\" (\\\\n  \\\\\"%test_bin%\\\\\" \\\\\"%TESTBRIDGE_TEST_ONLY%\\\\\"\\\\n  exit /b !ERRORLEVEL!\\\
+        \\n)\\\\nif defined CODEX_BAZEL_TEST_SKIP_FILTERS (\\\\n  call :run_selected_libtest %*\\\\n  exit /b !ERRORLEVEL!\\\
+        \\n)\\\\nif defined TOTAL_SHARDS if not \\\\\"%TOTAL_SHARDS%\\\\\"==\\\\\"0\\\\\" (\\\\n  call :run_selected_libtest\
+        \ %*\\\\n  exit /b !ERRORLEVEL!\\\\n)\\\\n\\\\n\\\\\"%test_bin%\\\\\" %*\\\\nexit /b %ERRORLEVEL%\\\\n\\\
+        \\n:run_selected_libtest\\\\nif defined TEST_SHARD_STATUS_FILE if defined TEST_TOTAL_SHARDS if not \\\\\"\
+        %TEST_TOTAL_SHARDS%\\\\\"==\\\\\"0\\\\\" (\\\\n  type nul > \\\\\"%TEST_SHARD_STATUS_FILE%\\\\\"\\\\n)\\\
+        \\n\\\\nif not \\\\\"%~1\\\\\"==\\\\\"\\\\\" (\\\\n  \\\\\"%test_bin%\\\\\" %*\\\\n  exit /b !ERRORLEVEL!\\\
+        \\n)\\\\n\\\\nset \\\\\"SHARD_INDEX=%RULES_RUST_TEST_SHARD_INDEX%\\\\\"\\\\nif not defined SHARD_INDEX set\
+        \ \\\\\"SHARD_INDEX=%TEST_SHARD_INDEX%\\\\\"\\\\nset \\\\\"HAS_SHARDS=\\\\\"\\\\nif defined TOTAL_SHARDS\
+        \ if not \\\\\"%TOTAL_SHARDS%\\\\\"==\\\\\"0\\\\\" set \\\\\"HAS_SHARDS=1\\\\\"\\\\nif defined HAS_SHARDS\
+        \ if not defined SHARD_INDEX (\\\\n  >&2 echo TEST_SHARD_INDEX or RULES_RUST_TEST_SHARD_INDEX must be set\
+        \ when sharding is enabled\\\\n  exit /b 1\\\\n)\\\\n\\\\nset \\\\\"TEMP_ROOT=%TEST_TMPDIR%\\\\\"\\\\nif\
+        \ not defined TEMP_ROOT set \\\\\"TEMP_ROOT=%TEMP%\\\\\"\\\\nif not defined TEMP_ROOT set \\\\\"TEMP_ROOT=.\\\
+        \\\"\\\\n:CREATE_TEMP_DIR\\\\nset \\\\\"TEMP_DIR=%TEMP_ROOT%\\\\\\\\workspace_root_test_sharding_!RANDOM!_!RANDOM!_!RANDOM!\\\
+        \\\"\\\\nmkdir \\\\\"!TEMP_DIR!\\\\\" 2>nul\\\\nif errorlevel 1 goto :CREATE_TEMP_DIR\\\\nset \\\\\"TEMP_LIST=!TEMP_DIR!\\\
+        \\\\\\list.txt\\\\\"\\\\nset \\\\\"TEMP_SHARD_LIST=!TEMP_DIR!\\\\\\\\shard.txt\\\\\"\\\\n\\\\n\\\\\"%test_bin%\\\
+        \\\" --list --format terse > \\\\\"!TEMP_LIST!\\\\\"\\\\nif errorlevel 1 (\\\\n  rmdir /s /q \\\\\"!TEMP_DIR!\\\
+        \\\" 2>nul\\\\n  exit /b 1\\\\n)\\\\n\\\\npowershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^\\\
+        \\n  \\\\\"$ErrorActionPreference = \\'Stop\\';\\\\\" ^\\\\n  \\\\\"$tests = @(Get-Content -LiteralPath\
+        \ $env:TEMP_LIST | Where-Object { $_.EndsWith(\\': test\\') } | ForEach-Object { $_.Substring(0, $_.Length\
+        \ - 6) });\\\\\" ^\\\\n  \\\\\"[Array]::Sort($tests, [StringComparer]::Ordinal);\\\\\" ^\\\\n  \\\\\"$hasShards\
+        \ = -not [string]::IsNullOrEmpty($env:HAS_SHARDS);\\\\\" ^\\\\n  \\\\\"$skipFilters = @();\\\\\" ^\\\\n\
+        \  \\\\\"if (-not [string]::IsNullOrEmpty($env:CODEX_BAZEL_TEST_SKIP_FILTERS)) { $skipFilters = @($env:CODEX_BAZEL_TEST_SKIP_FILTERS\
+        \ -split \\',\\' | Where-Object { $_ -ne \\'\\' }) };\\\\\" ^\\\\n  \\\\\"if ($hasShards) { $totalShards\
+        \ = [uint32]$env:TOTAL_SHARDS; $shardIndex = [uint32]$env:SHARD_INDEX };\\\\\" ^\\\\n  \\\\\"$fnvPrime =\
+        \ [uint64]16777619; $u32Mask = [uint64]4294967295;\\\\\" ^\\\\n  \\\\\"foreach ($test in $tests) { $skip\
+        \ = $false; foreach ($filter in $skipFilters) { if ($test.Contains($filter)) { $skip = $true; break } };\
+        \ if ($skip) { continue }; if ($hasShards) { $hash = [uint32]2166136261; foreach ($byte in [Text.Encoding]::UTF8.GetBytes($test))\
+        \ { $hash = [uint32](([uint64]($hash -bxor $byte) * $fnvPrime) -band $u32Mask) }; if (($hash %% $totalShards)\
+        \ -eq $shardIndex) { $test } } else { $test } }\\\\\" ^\\\\n  > \\\\\"!TEMP_SHARD_LIST!\\\\\"\\\\nif errorlevel\
+        \ 1 (\\\\n  rmdir /s /q \\\\\"!TEMP_DIR!\\\\\" 2>nul\\\\n  exit /b 1\\\\n)\\\\n\\\\npowershell.exe -NoProfile\
+        \ -ExecutionPolicy Bypass -Command ^\\\\n  \\\\\"$ErrorActionPreference = \\'Stop\\';\\\\\" ^\\\\n  \\\\\
+        \"$testBin = $env:test_bin;\\\\\" ^\\\\n  \\\\\"$tests = @(Get-Content -LiteralPath $env:TEMP_SHARD_LIST);\\\
+        \\\" ^\\\\n  \\\\\"$failed = $false; $limit = 7000; $batch = @(); $batchChars = $testBin.Length + 8;\\\\\
+        \" ^\\\\n  \\\\\"function Invoke-TestBatch { if ($script:batch.Count -eq 0) { return }; & $script:testBin\
+        \ @script:batch \\'--exact\\'; if ($LASTEXITCODE -ne 0) { $script:failed = $true }; $script:batch = @();\
+        \ $script:batchChars = $script:testBin.Length + 8 }\\\\\" ^\\\\n  \\\\\"foreach ($test in $tests) { $argChars\
+        \ = $test.Length + 3; if (($batch.Count -gt 0) -and ($batchChars + $argChars -gt $limit)) { Invoke-TestBatch\
+        \ }; $batch += $test; $batchChars += $argChars }\\\\\" ^\\\\n  \\\\\"Invoke-TestBatch; if ($failed) { exit\
+        \ 1 }\\\\\"\\\\nset \\\\\"TEST_EXIT=%ERRORLEVEL%\\\\\"\\\\n\\\\nrmdir /s /q \\\\\"!TEMP_DIR!\\\\\" 2>nul\\\
+        \\nexit /b !TEST_EXIT!\\\\n\\\\n:resolve_runfile\\\\nset \\\\\"resolve_runfile_result=\\\\\"\\\\nset \\\\\
+        \"resolve_runfile_logical_path=%~1\\\\\"\\\\nset \\\\\"resolve_runfile_workspace_logical_path=!resolve_runfile_logical_path!\\\
+        \\\"\\\\nif defined TEST_WORKSPACE set \\\\\"resolve_runfile_workspace_logical_path=%TEST_WORKSPACE%/!resolve_runfile_logical_path!\\\
+        \\\"\\\\nset \\\\\"resolve_runfile_native_logical_path=!resolve_runfile_logical_path:/=\\\\\\\\!\\\\\"\\\
+        \\nset \\\\\"resolve_runfile_native_workspace_logical_path=!resolve_runfile_workspace_logical_path:/=\\\\\
+        \\\\!\\\\\"\\\\n\\\\nfor %%R in (\\\\\"%RUNFILES_DIR%\\\\\" \\\\\"%TEST_SRCDIR%\\\\\") do (\\\\n  set \\\
+        \\\"resolve_runfile_root=%%~R\\\\\"\\\\n  if defined resolve_runfile_root (\\\\n    if exist \\\\\"!resolve_runfile_root!\\\
+        \\\\\\!resolve_runfile_native_logical_path!\\\\\" (\\\\n      set \\\\\"resolve_runfile_result=!resolve_runfile_root!\\\
+        \\\\\\!resolve_runfile_native_logical_path!\\\\\"\\\\n      goto :resolve_runfile_success\\\\n    )\\\\\
+        n    if exist \\\\\"!resolve_runfile_root!\\\\\\\\!resolve_runfile_native_workspace_logical_path!\\\\\"\
+        \ (\\\\n      set \\\\\"resolve_runfile_result=!resolve_runfile_root!\\\\\\\\!resolve_runfile_native_workspace_logical_path!\\\
+        \\\"\\\\n      goto :resolve_runfile_success\\\\n    )\\\\n  )\\\\n)\\\\n\\\\nset \\\\\"resolve_runfile_manifest=%RUNFILES_MANIFEST_FILE%\\\
+        \\\"\\\\nif not defined resolve_runfile_manifest if exist \\\\\"%~f0.runfiles_manifest\\\\\" set \\\\\"\
+        resolve_runfile_manifest=%~f0.runfiles_manifest\\\\\"\\\\nif not defined resolve_runfile_manifest if exist\
+        \ \\\\\"%~dpn0.runfiles_manifest\\\\\" set \\\\\"resolve_runfile_manifest=%~dpn0.runfiles_manifest\\\\\"\
+        \\\\nif not defined resolve_runfile_manifest if exist \\\\\"%~f0.exe.runfiles_manifest\\\\\" set \\\\\"\
+        resolve_runfile_manifest=%~f0.exe.runfiles_manifest\\\\\"\\\\n\\\\nif defined resolve_runfile_manifest if\
+        \ exist \\\\\"!resolve_runfile_manifest!\\\\\" (\\\\n  rem Read the manifest directly instead of shelling\
+        \ out to findstr. In the\\\\n  rem GitHub Windows runner, the nested `findstr` path produced\\\\n  rem `FINDSTR:\
+        \ Cannot open D:MANIFEST`, which then broke runfile resolution for\\\\n  rem Bazel tests even though the\
+        \ manifest file was present.\\\\n  rem A one-field manifest entry maps to itself, so fall back to %%A when\
+        \ the\\\\n  rem optional mapped path in %%B is empty.\\\\n  for /f \\\\\"usebackq tokens=1,* delims= \\\\\
+        \" %%A in (\\\\\"!resolve_runfile_manifest!\\\\\") do (\\\\n    if \\\\\"%%A\\\\\"==\\\\\"!resolve_runfile_logical_path!\\\
+        \\\" (\\\\n      set \\\\\"resolve_runfile_manifest_path=%%B\\\\\"\\\\n      if not defined resolve_runfile_manifest_path\
+        \ set \\\\\"resolve_runfile_manifest_path=%%A\\\\\"\\\\n      set \\\\\"resolve_runfile_result=!resolve_runfile_manifest_path!\\\
+        \\\"\\\\n      goto :resolve_runfile_success\\\\n    )\\\\n    if \\\\\"%%A\\\\\"==\\\\\"!resolve_runfile_workspace_logical_path!\\\
+        \\\" (\\\\n      set \\\\\"resolve_runfile_manifest_path=%%B\\\\\"\\\\n      if not defined resolve_runfile_manifest_path\
+        \ set \\\\\"resolve_runfile_manifest_path=%%A\\\\\"\\\\n      set \\\\\"resolve_runfile_result=!resolve_runfile_manifest_path!\\\
+        \\\"\\\\n      goto :resolve_runfile_success\\\\n    )\\\\n  )\\\\n)\\\\n\\\\n>&2 echo failed to resolve\
+        \ runfile: !resolve_runfile_logical_path!\\\\ncall :clear_resolve_runfile_state\\\\nexit /b 1\\\\n\\\\n:resolve_runfile_success\\\
+        \\nif not defined resolve_runfile_result (\\\\n  >&2 echo resolved runfile has an empty path: !resolve_runfile_logical_path!\\\
+        \\n  call :clear_resolve_runfile_state\\\\n  exit /b 1\\\\n)\\\\ncall :clear_resolve_runfile_state\\\\nexit\
+        \ /b 0\\\\n\\\\n:clear_resolve_runfile_state\\\\nset \\\\\"resolve_runfile_logical_path=\\\\\"\\\\nset \\\
+        \\\"resolve_runfile_workspace_logical_path=\\\\\"\\\\nset \\\\\"resolve_runfile_native_logical_path=\\\\\
+        \"\\\\nset \\\\\"resolve_runfile_native_workspace_logical_path=\\\\\"\\\\nset \\\\\"resolve_runfile_root=\\\
+        \\\"\\\\nset \\\\\"resolve_runfile_manifest=\\\\\"\\\\nset \\\\\"resolve_runfile_manifest_path=\\\\\"\\\\\
+        nexit /b 0\\\\n\", \"substitutions\": {\"__RUNFILE_ENV_EXPORTS__\": \"call :resolve_runfile \\\\\"codex-rs/bwrap/bwrap.exe\\\
+        \\\"\\\\nif errorlevel 1 exit /b 1\\\\nset \\\\\"CARGO_BIN_EXE_bwrap=!resolve_runfile_result!\\\\\"\\\\\
+        ncall :resolve_runfile \\\\\"codex-rs/code-mode-host/codex-code-mode-host.exe\\\\\"\\\\nif errorlevel 1\
+        \ exit /b 1\\\\nset \\\\\"CARGO_BIN_EXE_codex-code-mode-host=!resolve_runfile_result!\\\\\"\\\\ncall :resolve_runfile\
+        \ \\\\\"codex-rs/rmcp-client/test_stdio_server.exe\\\\\"\\\\nif errorlevel 1 exit /b 1\\\\nset \\\\\"CARGO_BIN_EXE_test_stdio_server=!resolve_runfile_result!\\\
+        \\\"\", \"__TEST_BIN__\": \"codex-rs/app-server/app-server-unit-tests-bin.exe\", \"__WORKSPACE_ROOT_SETUP__\"\
+        : \"set \\\\\"INSTA_WORKSPACE_ROOT=%workspace_root%\\\\\"\\\\ncd /d \\\\\"%workspace_root%\\\\\" || exit\
+        \ /b 1\", \"__WORKSPACE_ROOT_MARKER__\": \"codex-rs/utils/cargo-bin/repo_root.marker\"}, \"source\": \"\
+        44166665bd8f8988aa9c2445ed49778e62d2bd88\", \"note\": \"Only public template/substitutions retained; action\
+        \ environments not exported.\"}')\nassert Path(\"workspace_root_test_launcher.bat.tpl\").read_text()==metadata[\"\
+        templateContent\"]\nsubs=metadata[\"substitutions\"];text=metadata[\"templateContent\"]\nfor key,value in\
+        \ subs.items():text=text.replace(key,value)\ncs=base/'fixture.cs';cs.write_text('class Fixture { static\
+        \ int Main(string[] args) { if (System.Array.IndexOf(args,\"--list\") >= 0) System.Console.WriteLine(\"\
+        fixture_test: test\"); else System.Console.WriteLine(\"LAUNCHER_FIXTURE_EXECUTED\"); return 0; } }')\nexe=base/'fixture.exe';csc=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe';subprocess.run([str(csc),'/nologo','/out:'+str(exe),str(cs)],check=True)\n\
+        logical=re.findall(r'call :resolve_runfile \"([^\"]+)\"',text);runfiles=base/'runfiles'\nfor name in logical:\n\
+        \ dst=runfiles/'_main'/name;dst.parent.mkdir(parents=True,exist_ok=True)\n if name==subs['__WORKSPACE_ROOT_MARKER__']:dst.touch()\n\
+        \ else:shutil.copyfile(exe,dst)\nmanifest=base/'MANIFEST';manifest.write_text('\\n'.join(f'_main/{name}\
+        \ {runfiles/\"_main\"/name}' for name in logical)+'\\n')\nhost=dict(os.environ);folded={k.upper():v for\
+        \ k,v in host.items()};rows=[]\nfor mode in ['lf','crlf','lf-traced']:\n for layout in ['tree','manifest']:\n\
+        \  for sharded in [False,True]:\n   env=host.copy()\n   content=text if mode!='lf-traced' else text.replace('@echo\
+        \ off','@echo on',1)\n   if mode=='crlf':content=content.replace('\\n','\\r\\n')\n   (base/'generated.bat').write_bytes(content.encode())\n\
+        \   for k in ['RUNFILES_DIR','TEST_SRCDIR','RUNFILES_MANIFEST_FILE','RULES_RUST_TEST_TOTAL_SHARDS','TEST_TOTAL_SHARDS','TEST_SHARD_INDEX','RULES_RUST_TEST_SHARD_INDEX','CODEX_BAZEL_TEST_SKIP_FILTERS','TESTBRIDGE_TEST_ONLY']:env.pop(k,None)\n\
+        \   env.update(TEST_WORKSPACE='_main',TEST_TMPDIR=str(base))\n   if layout=='tree':env['RUNFILES_DIR']=str(runfiles)\n\
+        \   else:env['RUNFILES_MANIFEST_FILE']=str(manifest)\n   if sharded:env.update(TEST_TOTAL_SHARDS='1',TEST_SHARD_INDEX='0')\n\
+        \   result=subprocess.run(['cmd.exe','/d','/c',str(base/'generated.bat')],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=40)\n\
+        \   row={'mode':mode,'layout':layout,'sharded':sharded,'exit':result.returncode,'executed':'LAUNCHER_FIXTURE_EXECUTED'\
+        \ in result.stdout,'lost_bin':'resolved test binary was lost' in result.stdout};rows.append(row);print(json.dumps(row),flush=True)\n\
+        \   if result.returncode:print(result.stdout[-5000:],flush=True)\n(base/'controls.json').write_text(json.dumps(rows,indent=2))\n\
+        print('Diagnostic outcomes retained; no passing source-fix claim')\n"
+    - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      if: always()
+      with:
+        name: generated-launcher-context-ab
+        path: ${{ runner.temp }}/generated launcher fixture/controls.json
