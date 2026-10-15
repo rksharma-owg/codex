@@ -13,7 +13,7 @@ fn concurrent_first_default_allocators_do_not_race_process_initialization() {
             scope.spawn(|| {
                 initialize_v8(V8JitMode::Enabled).expect("initialize V8");
                 barrier.wait();
-                let _allocator = v8::array_buffer::new_default_allocator();
+                let _allocator = v8::new_default_allocator();
                 barrier.wait();
             });
         }
