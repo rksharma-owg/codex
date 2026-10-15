@@ -24,6 +24,10 @@ jobs:
     - uses: openai/fence@e6b39c80c51cb2b2a39448ddeff74b3b886c0a63
       with:
         mode: audit
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         fetch-depth: 0

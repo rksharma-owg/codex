@@ -24,6 +24,10 @@ jobs:
       codex: ${{ steps.detect.outputs.codex }}
       workflows: ${{ steps.detect.outputs.workflows }}
     steps:
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         fetch-depth: 0
@@ -79,6 +83,10 @@ jobs:
       run:
         working-directory: codex-rs
     steps:
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         persist-credentials: false
@@ -128,6 +136,10 @@ jobs:
       run:
         working-directory: codex-rs
     steps:
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         persist-credentials: false
@@ -176,6 +188,10 @@ jobs:
       CARGO_DYLINT_VERSION: 6.1.0
       DYLINT_LINK_VERSION: 6.1.0
     steps:
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         persist-credentials: false
@@ -281,6 +297,10 @@ jobs:
       run: "if [[ \"$ARGUMENT_COMMENT_LINT\" == \"true\" || \"$WORKFLOWS\" == \"true\" ]]; then\n  echo \"run=true\" >> \"\
         $GITHUB_OUTPUT\"\n  exit 0\nfi\n\necho \"No argument-comment-lint relevant changes.\"\necho \"run=false\" >> \"$GITHUB_OUTPUT\"\
         \n"
+    - name: Preserve committed line endings on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.autocrlf false
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       if: ${{ steps.argument_comment_lint_gate.outputs.run == 'true' }}
       with:
