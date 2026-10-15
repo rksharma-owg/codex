@@ -14,10 +14,9 @@ fn resolve_home_in_subprocess() {
         assert!(error.to_string().contains("CODEX_HOME"));
     } else {
         let expected = std::env::var_os("CODEX_HOME").expect("test home");
+        let actual = codex_utils_home_dir::find_codex_home().expect("valid CODEX_HOME");
         assert_eq!(
-            codex_utils_home_dir::find_codex_home()
-                .expect("valid CODEX_HOME")
-                .as_path(),
+            std::fs::canonicalize(actual).expect("canonical resolved home"),
             std::fs::canonicalize(expected).expect("canonical test home")
         );
     }
