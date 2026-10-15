@@ -1,0 +1,24 @@
+diff --git a/python/private/pypi/pip_archive.bzl b/python/private/pypi/pip_archive.bzl
+index 1764abe..a8e18d6 100644
+--- a/python/private/pypi/pip_archive.bzl
++++ b/python/private/pypi/pip_archive.bzl
+@@ -248,2 +248,3 @@ def _pip_archive_impl(rctx):
+     sdist_filename = None
++    requirement = rctx.attr.requirement
+     extra_pip_args = []
+@@ -282,2 +283,10 @@ def _pip_archive_impl(rctx):
+         else:
++            if "--require-hashes" in extra_pip_args and (rctx.attr.sha256 or rctx.attr.integrity):
++                has_requirement_hash = any([
++                    arg == "--hash" or arg.startswith("--hash=")
++                    for arg in requirement.replace("\n", " ").replace("\r", " ").replace("\t", " ").split(" ")
++                ])
++                if not has_requirement_hash:
++                    # Preserve the pinned hash verified by Bazel for pip's wheel build.
++                    requirement += " --hash=sha256:{}".format(result.sha256)
+             sdist_filename = filename
+@@ -302,3 +311,3 @@ def _pip_archive_impl(rctx):
+         "--requirement",
+-        rctx.attr.requirement,
++        requirement,
+     ]
