@@ -4,16 +4,16 @@ on:
     inputs:
       target-sha:
         type: string
-        required: !!bool 'true'
+        required: true
       patch-sha:
         type: string
-        required: !!bool 'true'
+        required: true
       base-sha:
         type: string
-        required: !!bool 'true'
+        required: true
       issue:
         type: string
-        required: !!bool 'true'
+        required: true
 jobs:
   bazel:
     name: Bazel
@@ -93,7 +93,7 @@ jobs:
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
-        persist-credentials: !!bool 'false'
+        persist-credentials: false
         ref: ${{ inputs.target-sha }}
         fetch-depth: 0
     - name: Verify exact tested revision and merge parents

@@ -4,16 +4,16 @@ on:
     inputs:
       target-sha:
         type: string
-        required: !!bool 'true'
+        required: true
       patch-sha:
         type: string
-        required: !!bool 'true'
+        required: true
       base-sha:
         type: string
-        required: !!bool 'true'
+        required: true
       issue:
         type: string
-        required: !!bool 'true'
+        required: true
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -24,7 +24,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
-        persist-credentials: !!bool 'false'
+        persist-credentials: false
         ref: ${{ inputs.target-sha }}
         fetch-depth: 0
     - name: Verify exact tested revision and merge parents
@@ -77,7 +77,7 @@ jobs:
     - name: Setup pnpm
       uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288
       with:
-        run_install: !!bool 'false'
+        run_install: false
     - name: Setup Node.js
       uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
       with:

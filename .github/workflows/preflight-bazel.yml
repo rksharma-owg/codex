@@ -4,16 +4,16 @@ on:
     inputs:
       target-sha:
         type: string
-        required: !!bool 'true'
+        required: true
       patch-sha:
         type: string
-        required: !!bool 'true'
+        required: true
       base-sha:
         type: string
-        required: !!bool 'true'
+        required: true
       issue:
         type: string
-        required: !!bool 'true'
+        required: true
 concurrency:
   group: fork-preflight-${{ inputs.issue }}-${{ inputs.target-sha }}-${{ github.workflow }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}
@@ -21,7 +21,7 @@ jobs:
   test:
     timeout-minutes: 60
     strategy:
-      fail-fast: !!bool 'false'
+      fail-fast: false
       matrix:
         include:
         - os: macos-15
@@ -36,11 +36,11 @@ jobs:
     name: Bazel test on ${{ matrix.os }} for ${{ matrix.target }}
     environment:
       name: bazel
-      deployment: !!bool 'false'
+      deployment: false
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
-        persist-credentials: !!bool 'false'
+        persist-credentials: false
         ref: ${{ inputs.target-sha }}
         fetch-depth: 0
     - name: Verify exact tested revision and merge parents
@@ -97,7 +97,7 @@ jobs:
         ${bazel_test_args[@]}\" \\\n  -- \\\n  \"${bazel_targets[@]}\"\n"
     - name: Upload Bazel execution logs
       if: always() && !cancelled()
-      continue-on-error: !!bool 'true'
+      continue-on-error: true
       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
       with:
         name: ${{ inputs.issue }}-bazel-execution-logs-test-${{ matrix.target }}
@@ -105,7 +105,7 @@ jobs:
         if-no-files-found: ignore
     - name: Save bazel repository cache
       if: always() && !cancelled() && steps.prepare_bazel.outputs.repository-cache-hit != 'true'
-      continue-on-error: !!bool 'true'
+      continue-on-error: true
       uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7
       with:
         path: ${{ steps.prepare_bazel.outputs.repository-cache-path }}
@@ -116,7 +116,7 @@ jobs:
   test-windows-shard:
     timeout-minutes: 60
     strategy:
-      fail-fast: !!bool 'false'
+      fail-fast: false
       matrix:
         shard:
         - 1
@@ -127,11 +127,11 @@ jobs:
     name: Bazel test on windows-latest for x86_64-pc-windows-gnullvm shard ${{ matrix.shard }}/4
     environment:
       name: bazel
-      deployment: !!bool 'false'
+      deployment: false
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
-        persist-credentials: !!bool 'false'
+        persist-credentials: false
         ref: ${{ inputs.target-sha }}
         fetch-depth: 0
     - name: Verify exact tested revision and merge parents
@@ -192,7 +192,7 @@ jobs:
         \n"
     - name: Upload Bazel execution logs
       if: always() && !cancelled()
-      continue-on-error: !!bool 'true'
+      continue-on-error: true
       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
       with:
         name: ${{ inputs.issue }}-bazel-execution-logs-test-x86_64-pc-windows-gnullvm-shard-${{ matrix.shard }}
@@ -214,7 +214,7 @@ jobs:
   clippy:
     timeout-minutes: 60
     strategy:
-      fail-fast: !!bool 'false'
+      fail-fast: false
       matrix:
         include:
         - os: ubuntu-24.04
@@ -227,11 +227,11 @@ jobs:
     name: Bazel clippy on ${{ matrix.os }} for ${{ matrix.target }}
     environment:
       name: bazel
-      deployment: !!bool 'false'
+      deployment: false
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
-        persist-credentials: !!bool 'false'
+        persist-credentials: false
         ref: ${{ inputs.target-sha }}
         fetch-depth: 0
     - name: Verify exact tested revision and merge parents
@@ -282,7 +282,7 @@ jobs:
         \n"
     - name: Upload Bazel execution logs
       if: always() && !cancelled()
-      continue-on-error: !!bool 'true'
+      continue-on-error: true
       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
       with:
         name: ${{ inputs.issue }}-bazel-execution-logs-clippy-${{ matrix.target }}
@@ -290,7 +290,7 @@ jobs:
         if-no-files-found: ignore
     - name: Save bazel repository cache
       if: always() && !cancelled() && steps.prepare_bazel.outputs.repository-cache-hit != 'true'
-      continue-on-error: !!bool 'true'
+      continue-on-error: true
       uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7
       with:
         path: ${{ steps.prepare_bazel.outputs.repository-cache-path }}
@@ -301,7 +301,7 @@ jobs:
   verify-release-build:
     timeout-minutes: 60
     strategy:
-      fail-fast: !!bool 'false'
+      fail-fast: false
       matrix:
         include:
         - os: ubuntu-24.04
@@ -314,11 +314,11 @@ jobs:
     name: Verify release build on ${{ matrix.os }} for ${{ matrix.target }}
     environment:
       name: bazel
-      deployment: !!bool 'false'
+      deployment: false
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
-        persist-credentials: !!bool 'false'
+        persist-credentials: false
         ref: ${{ inputs.target-sha }}
         fetch-depth: 0
     - name: Verify exact tested revision and merge parents
@@ -378,7 +378,7 @@ jobs:
         \ \\\n  -- \\\n  //codex-rs/bwrap:bwrap\n"
     - name: Upload Bazel execution logs
       if: always() && !cancelled()
-      continue-on-error: !!bool 'true'
+      continue-on-error: true
       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
       with:
         name: ${{ inputs.issue }}-bazel-execution-logs-verify-release-build-${{ matrix.target }}
@@ -386,7 +386,7 @@ jobs:
         if-no-files-found: ignore
     - name: Save bazel repository cache
       if: always() && !cancelled() && steps.prepare_bazel.outputs.repository-cache-hit != 'true'
-      continue-on-error: !!bool 'true'
+      continue-on-error: true
       uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7
       with:
         path: ${{ steps.prepare_bazel.outputs.repository-cache-path }}
