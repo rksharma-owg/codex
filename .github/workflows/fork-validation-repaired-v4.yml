@@ -122,6 +122,24 @@ jobs:
       shell: bash
       working-directory: codex-rs
       run: cargo test --locked -p codex-app-server-daemon --lib backend::pid::tests::pid_probe_
+      if: runner.os != 'Windows'
+    - name: Windows PID live-reservation regression with MSVC linker
+      if: runner.os == 'Windows'
+      shell: pwsh
+      working-directory: codex-rs
+      run: '$linker = Join-Path $env:VCToolsInstallDir ''bin\Hostx64\x64\link.exe''
+
+        if (-not (Test-Path $linker)) { throw "MSVC linker not found at $linker" }
+
+        $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER = $linker
+
+        Write-Host "Cargo MSVC linker: $linker"
+
+        cargo test --locked -p codex-app-server-daemon --lib backend::pid::tests::pid_probe_
+
+        exit $LASTEXITCODE
+
+        '
     - name: Native Windows rustls provider regression
       if: runner.os == 'Windows'
       shell: bash
