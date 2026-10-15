@@ -279,6 +279,39 @@ def test_root_format_driver_covers_all_formatter_groups(
     ]
 
 
+@pytest.mark.parametrize("check", [False, True])
+def test_root_rust_formatter_batches_paths_for_windows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    check: bool,
+) -> None:
+    script = _load_root_format_script_module()
+    files = []
+    for index in range(512):
+        path = tmp_path / "codex-rs" / "src" / f"formatter file {'x' * 60}{index:04}.rs"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+        files.append(path.relative_to(tmp_path).as_posix())
+    monkeypatch.setattr(script, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        script.subprocess,
+        "check_output",
+        lambda *args, **kwargs: os.fsencode("\0".join(reversed(files)) + "\0"),
+    )
+
+    group = script.rust_formatter_group(check=check)
+
+    assert len(group.commands) > 1
+    actual_files = []
+    for command in group.commands:
+        assert command.args[0] == "rustfmt"
+        assert command.cwd == tmp_path / "codex-rs"
+        assert ("--check" in command.args) == check
+        assert len(subprocess.list2cmdline(command.args)) < 32767
+        actual_files.extend(command.args[8 if check else 7 :])
+    assert actual_files == [os.path.join("src", Path(path).name) for path in sorted(files)]
+
+
 def test_root_format_driver_discards_successful_command_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
