@@ -1,0 +1,115 @@
+name: Sandbox fixture resource regression and full suite
+'on':
+  push:
+    branches:
+    - codex/ci-sandbox-resource-preflight-20261015
+permissions:
+  contents: read
+jobs:
+  sandbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      RUST_MIN_STACK: '8388608'
+      CARGO_INCREMENTAL: '0'
+    defaults:
+      run:
+        working-directory: codex-rs
+    name: Sandbox symlink ${{ matrix.case.mode }}
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+        - mode: baseline
+          sha: e89b7c442c0433ad5167e72a5a25bb6d0712766a
+        - mode: roots-baseline
+          sha: 2d17ddf065ef5c5785489cd8f166e4742ad3bd3e
+        - mode: fixed
+          sha: 44166665bd8f8988aa9c2445ed49778e62d2bd88
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: ${{ matrix.case.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Verify tested source
+      shell: bash
+      env:
+        TESTED: ${{ matrix.case.sha }}
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$TESTED" ]]
+
+        printf "tested=%s\nworkflow=%s\n" "$TESTED" "${{ github.workflow_sha }}"
+
+        '
+    - uses: ./.github/actions/setup-ci
+    - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      with:
+        components: rustfmt,clippy,rust-src
+    - name: Verify pinned Rust
+      shell: bash
+      run: 'rustc --version --verbose
+
+        cargo --version
+
+        rustc --version | grep -F "rustc 1.95.0 "'
+    - name: Linux build dependencies
+      run: sudo apt-get update && sudo apt-get install -y pkg-config libcap-dev bubblewrap
+    - name: Actual sandbox executable with symlinked layout
+      shell: bash
+      env:
+        PROBE_MODE: ${{ matrix.case.mode }}
+      run: "python3 - <<'PY'\n\"\"\"Exercise the real restricted sandbox with a symlinked executable layout.\"\"\
+        \"\nfrom pathlib import Path\nimport hashlib\nimport json\nimport os\nimport shutil\nimport subprocess\n\
+        import tempfile\n\nmode = os.environ['PROBE_MODE']\nassert mode in ('baseline', 'roots-baseline', 'fixed')\n\
+        bwrap_build = subprocess.run(['cargo','build','--locked','-p','codex-bwrap','--bin','bwrap','--message-format=json'],text=True,stdout=subprocess.PIPE,check=True)\n\
+        bwrap_artifacts = [json.loads(line) for line in bwrap_build.stdout.splitlines() if line.startswith('{')]\n\
+        bwrap_paths = [Path(a['executable']) for a in bwrap_artifacts if a.get('reason') == 'compiler-artifact'\
+        \ and a.get('executable') and a['target']['name'] == 'bwrap']\nassert len(bwrap_paths) == 1\nbwrap = bwrap_paths[0]\n\
+        with bwrap.open('rb') as stream:\n    bwrap_digest = hashlib.file_digest(stream,'sha256').hexdigest()\n\
+        os.environ['CODEX_BWRAP_SHA256'] = bwrap_digest\nos.environ['CARGO_BIN_EXE_bwrap'] = str(bwrap)\ncommand\
+        \ = ['cargo', 'test', '--locked', '-p', 'codex-linux-sandbox', '--test', 'all', '--no-run', '--message-format=json']\n\
+        build = subprocess.run(command, text=True, stdout=subprocess.PIPE, check=True)\nartifacts = [json.loads(line)\
+        \ for line in build.stdout.splitlines() if line.startswith('{')]\nartifacts = [a for a in artifacts if a.get('reason')\
+        \ == 'compiler-artifact' and a.get('executable')]\ntest_bins = [Path(a['executable']) for a in artifacts\
+        \ if a['target']['src_path'].endswith('/linux-sandbox/tests/all.rs')]\nsandbox_bins = [Path(a['executable'])\
+        \ for a in artifacts if a['target']['name'] == 'codex-linux-sandbox' and a['target']['kind'] == ['bin']]\n\
+        assert len(test_bins) == len(sandbox_bins) == 1, (test_bins, sandbox_bins)\ntest_bin, sandbox_bin = test_bins[0],\
+        \ sandbox_bins[0]\nassert sandbox_bin.is_file() and not sandbox_bin.is_symlink()\nwith sandbox_bin.open('rb')\
+        \ as stream:\n    digest = hashlib.file_digest(stream, 'sha256').hexdigest()\ncase = 'suite::managed_proxy::managed_proxy_mode_routes_through_bridge_and_blocks_direct_egress'\n\
+        if mode == 'roots-baseline':\n    case = 'suite::sandbox::root_metadata_tests::root_metadata_symlinks_cannot_reopen_approved_denials'\n\
+        record = dict(mode=mode,logical_binary=str(sandbox_bin),sha256=digest,bwrap_sha256=bwrap_digest)\nwith tempfile.TemporaryDirectory(prefix='real-sandbox-helper-',dir=os.environ['RUNNER_TEMP'])\
+        \ as tmp:\n    actual = Path(tmp) / sandbox_bin.name\n    resources = Path(tmp) / 'codex-resources'\n  \
+        \  resources.mkdir()\n    shutil.copy2(bwrap,resources/'bwrap')\n    shutil.move(sandbox_bin, actual)\n\
+        \    sandbox_bin.symlink_to(actual)\n    try:\n        assert sandbox_bin.resolve() == actual.resolve()\n\
+        \        result = subprocess.run([str(test_bin),'--exact',case,'--nocapture'],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=120)\n\
+        \        print(result.stdout,flush=True)\n        record.update(resolved_binary=str(actual),regression_exit_code=result.returncode,regression_output=result.stdout)\n\
+        \        assert 'skipping' not in result.stdout.lower(), 'Focused regression returned early instead of exercising\
+        \ sandbox'\n        if mode == 'roots-baseline':\n            assert result.returncode != 0 and '1 failed'\
+        \ in result.stdout\n            assert 'bubblewrap is unavailable' in result.stdout\n            record['root_metadata_expected_negative_verified']\
+        \ = True\n        elif mode == 'baseline':\n            assert result.returncode != 0, 'Negative control\
+        \ unexpectedly passed'\n            assert 'expected routed command to execute successfully' in result.stdout\n\
+        \            assert 'No such file or directory' in result.stdout and '1 failed' in result.stdout\n     \
+        \       record['expected_negative_verified'] = True\n        else:\n            assert result.returncode\
+        \ == 0 and '1 passed; 0 failed' in result.stdout\n            record['focused_positive_verified'] = True\n\
+        \            suite = subprocess.run([str(test_bin),'--nocapture'],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=600)\n\
+        \            print(suite.stdout,flush=True)\n            record.update(suite_exit_code=suite.returncode,suite_output=suite.stdout,suite_runtime_skip_messages=[line\
+        \ for line in suite.stdout.splitlines() if 'skipping' in line.lower()])\n            assert suite.returncode\
+        \ == 0\n    finally:\n        sandbox_bin.unlink()\n        shutil.move(actual,sandbox_bin)\n        with\
+        \ sandbox_bin.open('rb') as stream:\n            assert hashlib.file_digest(stream,'sha256').hexdigest()\
+        \ == digest\n        Path(os.environ['RUNNER_TEMP'],'sandbox-symlink-evidence.json').write_text(json.dumps(record,indent=2)+'\\\
+        n')\nprint(json.dumps({k:v for k,v in record.items() if not k.endswith('_output')}),flush=True)\n\nPY\n"
+    - name: Strict sandbox Clippy
+      if: always() && !cancelled()
+      run: cargo clippy --locked -p codex-linux-sandbox --tests -- -D warnings
+    - name: Upload layout evidence
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      if: always() && !cancelled()
+      with:
+        name: sandbox-symlink-${{ matrix.case.mode }}
+        path: ${{ runner.temp }}/sandbox-symlink-evidence.json
+        if-no-files-found: warn
+    - name: Clean worktree
+      uses: ./.github/actions/check-clean-worktree
+      if: always() && !cancelled()
