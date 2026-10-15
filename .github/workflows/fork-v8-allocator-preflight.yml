@@ -1,0 +1,76 @@
+name: Fresh process V8 allocator concurrency reproduction
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: unchanged-runtime-regression
+          source: c7ae2484f7fe363df1a7b78ddcd6e27ef6a2e44c
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        ref: ${{ matrix.source }}
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Verify repaired baseline
+      shell: bash
+      run: 'set -euo pipefail
+
+        [[ "$(git rev-parse HEAD)" == "$SOURCE" ]]
+
+        printf "tested=%s\nworkflow=%s\n" "$SOURCE" "${{ github.workflow_sha }}"
+
+        '
+      env:
+        SOURCE: ${{ matrix.source }}
+    - uses: ./.github/actions/prepare-bazel-ci
+      with:
+        target: x86_64-pc-windows-msvc
+        cache-scope: v8-allocator-probe
+    - name: Configure storage for public native runners
+      shell: bash
+      run: "set -euo pipefail\n# Reclaim optional preinstalled SDKs that this Rust/Python/Node matrix does not use.\n\
+        # This runs only on the disposable hosted runner, outside the source checkout.\nif [[ \"$RUNNER_OS\" ==\
+        \ Linux ]]; then\n  sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc\nfi\n# Upstream remote\
+        \ CI also disables the duplicate local action cache.\nprintf '\\ncommon --disk_cache=\\n' >> \"$HOME/.bazelrc\"\
+        \ndf -h\nrc_log=\"$RUNNER_TEMP/fork-bazel-rc.log\"\nbazel info --announce_rc output_base 2>&1 | tee \"$rc_log\"\
+        \nlast_cache_option=\"$(grep -oE -- '--disk_cache=[^[:space:]]*' \"$rc_log\" | tail -n 1)\"\n[[ \"$last_cache_option\"\
+        \ == --disk_cache= ]]\n"
+    - name: Reproduce first allocator race with unchanged initialization
+      shell: bash
+      run: 'set -euo pipefail
+
+        set +e
+
+        ./.github/scripts/run-bazel-ci.sh --print-failed-action-summary --print-failed-test-logs -- test --test_output=all
+        --runs_per_test=3 -- //codex-rs/code-mode-runtime:code-mode-runtime-v8_init-test 2>&1 | tee "$RUNNER_TEMP/v8-allocator-tests.log"
+
+        status=${PIPESTATUS[0]}
+
+        set -e
+
+        [[ "$status" != 0 ]]
+
+        grep -F ''Check failed: !IsConfigurablePoolInitialized().'' "$RUNNER_TEMP/v8-allocator-tests.log"
+
+        '
+    - name: Upload probe diagnostics
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      if: always() && !cancelled()
+      with:
+        name: v8-allocator-negative-control
+        path: '${{ runner.temp }}/v8-allocator-tests.log
+
+          ${{ runner.temp }}/bazel-execution-logs'
+    - name: Clean worktree
+      uses: ./.github/actions/check-clean-worktree
+      if: always() && !cancelled()
+'on':
+  push:
+    branches:
+    - codex/ci-v8-allocator-preflight-20261015
