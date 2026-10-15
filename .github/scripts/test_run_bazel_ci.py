@@ -86,6 +86,11 @@ class RunBazelCiTest(unittest.TestCase):
                 args = self.run_wrapper(*options)
                 self.assertNotIn("--config=ci-windows-msvc", args)
 
+    def test_explicit_host_platform_keeps_its_toolchain_selection(self) -> None:
+        args = self.run_wrapper("--host_platform=//:custom_host")
+        self.assertIn("--host_platform=//:custom_host", args)
+        self.assertNotIn("--config=ci-windows-msvc", args)
+
     def test_direct_windows_build_keeps_gnu_toolchains(self) -> None:
         args = self.run_wrapper(cross=False)
         self.assertNotIn("--config=ci-windows-msvc", args)
