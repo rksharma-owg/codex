@@ -42,6 +42,7 @@ jobs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: git config --global core.autocrlf false
+      working-directory: ${{ github.workspace }}
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         persist-credentials: false
@@ -145,6 +146,7 @@ jobs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: git config --global core.autocrlf false
+      working-directory: ${{ github.workspace }}
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         persist-credentials: false
@@ -257,6 +259,7 @@ jobs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: git config --global core.autocrlf false
+      working-directory: ${{ github.workspace }}
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         persist-credentials: false
@@ -356,6 +359,7 @@ jobs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: git config --global core.autocrlf false
+      working-directory: ${{ github.workspace }}
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
         persist-credentials: false
