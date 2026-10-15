@@ -1,3 +1,4 @@
+load("@rules_rust//rust:defs.bzl", "rust_test")
 load("//:defs.bzl", "codex_rust_crate")
 load("//bazel/rules:runtime_package.bzl", "release_binary")
 
@@ -33,4 +34,14 @@ codex_rust_crate(
 
 release_binary(
     binary = ":codex-app-server",
+)
+
+rust_test(
+    name = "windows-workspace-root-launcher-test",
+    srcs = ["windows_workspace_root_launcher_test.rs"],
+    crate_name = "windows_workspace_root_launcher_test",
+    data = [":app-server-unit-tests"],
+    edition = "2024",
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = ["//codex-rs/utils/cargo-bin"],
 )
